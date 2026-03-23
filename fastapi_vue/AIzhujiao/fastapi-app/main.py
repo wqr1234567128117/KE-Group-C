@@ -1,19 +1,17 @@
 from fastapi import FastAPI
-from pydantic import BaseModel
-from typing import Optional
+from fastapi.middleware.cors import CORSMiddleware
+from api import router
 
 app = FastAPI()
 
-class QuestionRequest(BaseModel):
-    question: str
+# 允许前端跨域访问
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-class AnswerResponse(BaseModel):
-    answer: str
-
-@app.post("/api/ask", response_model=AnswerResponse)
-async def ask_question(request: QuestionRequest):
-    # 这里你可以接入真实的 AI 模型（如 LangChain、HuggingFace、OpenAI 等）
-    # 示例：简单回复
-    return AnswerResponse(answer=f"你问的是：'{request.question}'，这是个很好的问题！")
-
-# 启动命令：uvicorn main:app --reload
+# 把 api.py 里的所有接口挂载进来
+app.include_router(router)
