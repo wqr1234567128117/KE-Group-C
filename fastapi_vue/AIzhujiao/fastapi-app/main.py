@@ -1,7 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from api import router
+from service import api
 
+router = api.router
 app = FastAPI()
 
 # 允许前端跨域访问
