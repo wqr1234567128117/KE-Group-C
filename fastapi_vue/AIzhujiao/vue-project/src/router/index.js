@@ -1,11 +1,12 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import SmartQA from '../views/SmartQA.vue' // 确保路径正确
+import Home from '../views/Home.vue'
 
 const routes = [
   {
     path: '/',
     name: 'Home',
-    component: () => import('../APP.vue') // 假设已有首页
+    component: Home
   },
   {
     path: '/smart-qa',
