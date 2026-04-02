@@ -5,6 +5,8 @@ import SmartQA from '../views/SmartQA.vue'
 import Login from '../views/Login.vue'
 import LearningPath from '../views/LearningPath.vue'
 import Progress from '../views/Progress.vue'
+import PersonLearningPath from '../views/PersonLearningPath.vue'
+import LLMLearningPath from '../views/LLMLearningPath.vue'
 
 const routes = [
   { path: '/login', name: 'Login', component: Login },
@@ -30,6 +32,18 @@ const routes = [
     path: '/progress',
     name: 'Progress',
     component: Progress,
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/person-learning-path',
+    name: 'PersonLearningPath',
+    component: PersonLearningPath,
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/LLMlearningpath',
+    name: 'LLMLearningPath',
+    component: LLMLearningPath,
     meta: { requiresAuth: true }
   }
 ]

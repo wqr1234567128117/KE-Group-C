@@ -1,153 +1,151 @@
+<script setup>
+import { ref, computed } from 'vue';
+import Sidebar from '../components/Sidebar.vue';
+import ChatWindow from '../components/ChatWindow.vue';
+
+// ---------- 虚拟对话数据 ----------
+// 对话列表（模拟历史记录）
+const chatHistory = ref([
+  { id: 1, title: '方剂数据字段映射优化', time: '2023-10-27' },
+  { id: 2, title: '修改中医知识库代码', time: '2023-10-26' },
+  { id: 3, title: '针灸知识库分级授权与语义检索', time: '2023-10-25' },
+]);
+
+// 当前选中的对话ID（默认为第一个对话）
+const currentChatId = ref(chatHistory.value[0]?.id || null);
+
+// 对话内容映射（模拟每个对话的消息记录）
+const chatContents = ref({
+  1: [
+    { role: 'assistant', content: '你好！关于“方剂数据字段映射优化”，请问需要我帮你分析哪些字段？' },
+    { role: 'user', content: '帮我梳理一下“方剂名称”和“药材组成”的映射逻辑。' },
+  ],
+  2: [
+    { role: 'assistant', content: '关于“中医知识库代码修改”，请提供具体需求或代码片段，我会帮你分析。' },
+  ],
+  3: [
+    { role: 'assistant', content: '“针灸知识库分级授权与语义检索”的需求已收到，需要我帮你设计权限模型吗？' },
+  ],
+});
+
+// 当前对话的内容（根据 currentChatId 动态获取）
+const currentChatContent = computed(() => {
+  return chatContents.value[currentChatId.value] || [];
+});
+
+// 侧边栏折叠状态
+const isSidebarCollapsed = ref(false);
+
+// ---------- 事件处理 ----------
+// 新建对话
+const handleNewChat = () => {
+  const newId = Date.now(); // 用时间戳生成唯一ID
+  chatHistory.value.unshift({
+    id: newId,
+    title: `新对话 ${chatHistory.value.length + 1}`,
+    time: new Date().toLocaleDateString(),
+  });
+  currentChatId.value = newId;
+  // 新对话默认无内容
+  chatContents.value[newId] = [];
+};
+
+// 切换对话
+const handleSelectChat = (id) => {
+  currentChatId.value = id;
+};
+
+// 发送消息（模拟对话更新）
+const handleSendMessage = (message) => {
+  if (!currentChatId.value) return;
+  // 向当前对话的消息列表中添加新消息
+  chatContents.value[currentChatId.value].push({
+    role: 'user',
+    content: message,
+  });
+  // 模拟AI回复（实际场景可替换为接口调用）
+  setTimeout(() => {
+    chatContents.value[currentChatId.value].push({
+      role: 'assistant',
+      content: `这是对“${message}”的回复（模拟AI响应）`,
+    });
+  }, 1000);
+};
+
+// 重命名对话
+const handleRenameChat = (id) => {
+  const newName = prompt('请输入新的对话标题:');
+  if (newName) {
+    const chat = chatHistory.value.find(c => c.id === id);
+    if (chat) {
+      chat.title = newName;
+    }
+  }
+};
+
+// 置顶对话
+const handlePinChat = (id) => {
+  const index = chatHistory.value.findIndex(c => c.id === id);
+  if (index > -1) {
+    // 从当前位置移除并添加到数组开头
+    const [pinnedChat] = chatHistory.value.splice(index, 1);
+    chatHistory.value.unshift(pinnedChat);
+  }
+};
+
+// 分享对话（模拟）
+const handleShareChat = (id) => {
+  alert(`正在生成对话 ${id} 的分享链接...`);
+};
+
+// 删除对话
+const handleDeleteChat = (id) => {
+  if (confirm('确定要删除这个对话吗？')) {
+    // 从历史列表中移除
+    chatHistory.value = chatHistory.value.filter(c => c.id !== id);
+    // 从内容映射中移除
+    delete chatContents.value[id];
+
+    // 如果删除的是当前选中的对话，切换到剩下的第一个对话或null
+    if (currentChatId.value === id) {
+      currentChatId.value = chatHistory.value[0]?.id || null;
+    }
+  }
+};
+</script>
+
 <template>
-  <div class="qa-layout">
-    <!-- 左侧：聊天区域 -->
-    <div class="chat-area">
-      <div class="messages">
-        <div v-for="(msg, idx) in messages" :key="idx" :class="['msg', msg.role]">
-          <strong>{{ msg.role === 'user' ? '我' : '助教' }}:</strong>
-          <p>{{ msg.content }}</p>
-          <!-- 如果是作业辅助，显示 tips -->
-          <ul v-if="msg.tips" class="tips-list">
-            <li v-for="tip in msg.tips" :key="tip">{{ tip }}</li>
-          </ul>
-        </div>
-      </div>
+  <div class="smart-qa-container">
+    <!-- 修改点：
+         1. 去掉标签末尾的 '/'
+         2. 添加缺失的事件绑定
+         3. 在标签后显式添加 </Sidebar> 闭合标签
+    -->
+    <Sidebar
+      :history="chatHistory"
+      :current-chat-id="currentChatId"
+      @new-chat="handleNewChat"
+      @select-chat="handleSelectChat"
+      @rename-chat="handleRenameChat"
+      @pin-chat="handlePinChat"
+      @share-chat="handleShareChat"
+      @delete-chat="handleDeleteChat"
+      @select-recommend="handleSelectRecommend"
+      v-model:collapsed="isSidebarCollapsed"
+    ></Sidebar>
 
-      <div class="input-area">
-        <input v-model="question" placeholder="输入问题..." @keyup.enter="sendQuestion" />
-        <button @click="sendQuestion">发送</button>
-        <button @click="toggleMode" class="mode-btn">
-          {{ isHomeworkMode ? '切换回普通问答' : '切换至作业辅助' }}
-        </button>
-      </div>
-    </div>
-
-    <!-- 右侧：辅助信息 -->
-    <div class="sidebar">
-      <div class="panel">
-        <h3>🔥 热门问题</h3>
-        <ul>
-          <li v-for="item in hotQuestions" :key="item.question" @click="question = item.question">
-            {{ item.question }} ({{ item.count }})
-          </li>
-        </ul>
-      </div>
-
-      <div class="panel">
-        <h3>💡 推荐问题</h3>
-        <ul>
-          <li v-for="q in suggestions" :key="q" @click="question = q">{{ q }}</li>
-        </ul>
-      </div>
-
-      <div class="panel">
-        <h3>📜 历史记录</h3>
-        <button @click="loadHistory" class="small-btn">刷新</button>
-        <button @click="clearHistory" class="small-btn danger">清空</button>
-        <ul class="history-list">
-          <li v-for="rec in history" :key="rec.id">
-            <small>{{ rec.created_at }}</small><br>
-            {{ rec.question }}
-          </li>
-        </ul>
-      </div>
-    </div>
+    <ChatWindow
+      :class="{'main-content-collapsed': isSidebarCollapsed}"
+      :chat-content="currentChatContent"
+      @send-message="handleSendMessage"
+    />
   </div>
 </template>
 
-<script setup>
-import { ref, onMounted, reactive } from 'vue'
-import api from '../api/index'
-
-const user = JSON.parse(localStorage.getItem('user_info'))
-const userId = user?.user_id
-
-const question = ref('')
-const messages = ref([])
-const history = ref([])
-const hotQuestions = ref([])
-const suggestions = ref([])
-const isHomeworkMode = ref(false)
-
-// 初始化加载
-onMounted(() => {
-  if (!userId) return
-  loadHistory()
-  loadSidebarData()
-})
-
-const loadSidebarData = async () => {
-  try {
-    const [hotRes, sugRes] = await Promise.all([
-      api.getHotQuestions(),
-      api.getSuggestions()
-    ])
-    hotQuestions.value = hotRes.data
-    suggestions.value = sugRes.data
-  } catch (e) { console.error(e) }
-}
-
-const loadHistory = async () => {
-  try {
-    const res = await api.getHistory(userId)
-    history.value = res.data
-    // 将历史记录也渲染到消息区（可选）
-  } catch (e) { console.error(e) }
-}
-
-const clearHistory = async () => {
-  if(!confirm('确定清空历史吗？')) return
-  await api.clearHistory(userId)
-  loadHistory()
-}
-
-const sendQuestion = async () => {
-  if (!question.value.trim()) return
-
-  const qText = question.value
-  messages.value.push({ role: 'user', content: qText })
-  question.value = ''
-
-  try {
-    let res
-    if (isHomeworkMode.value) {
-      res = await api.getHomeworkHelp(userId, qText)
-      messages.value.push({
-        role: 'assistant',
-        content: res.data.answer,
-        tips: res.data.tips
-      })
-    } else {
-      res = await api.askQuestion(userId, qText)
-      messages.value.push({ role: 'assistant', content: res.data.answer })
-    }
-    // 发送后刷新历史
-    loadHistory()
-  } catch (e) {
-    messages.value.push({ role: 'system', content: '请求失败，请稍后重试' })
-  }
-}
-
-const toggleMode = () => {
-  isHomeworkMode.value = !isHomeworkMode.value
-}
-</script>
-
 <style scoped>
-.qa-layout { display: flex; height: 80vh; gap: 20px; padding: 20px; }
-.chat-area { flex: 3; display: flex; flex-direction: column; border: 1px solid #ccc; border-radius: 8px; }
-.messages { flex: 1; overflow-y: auto; padding: 10px; background: #f9f9f9; }
-.msg { margin: 10px 0; padding: 10px; border-radius: 5px; }
-.msg.user { background: #e3f2fd; text-align: right; }
-.msg.assistant { background: #fff; border: 1px solid #eee; }
-.tips-list { background: #fff3cd; padding: 5px 15px; font-size: 0.9em; }
-.input-area { display: flex; padding: 10px; border-top: 1px solid #ccc; }
-.input-area input { flex: 1; padding: 8px; }
-.sidebar { flex: 1; overflow-y: auto; }
-.panel { margin-bottom: 20px; border: 1px solid #eee; padding: 10px; border-radius: 5px; }
-.history-list { list-style: none; padding: 0; font-size: 0.85em; }
-.history-list li { border-bottom: 1px solid #eee; padding: 5px 0; cursor: pointer; }
-.small-btn { padding: 2px 8px; font-size: 0.8em; margin-right: 5px; }
-.danger { background: #ffebee; color: red; border: 1px solid red; }
-.mode-btn { margin-left: 10px; background: #ff9800; color: white; border: none; padding: 0 10px; cursor: pointer;}
+.smart-qa-container {
+  display: flex;
+  height: 100vh;
+  background-color: #f5f5f5;
+}
 </style>
