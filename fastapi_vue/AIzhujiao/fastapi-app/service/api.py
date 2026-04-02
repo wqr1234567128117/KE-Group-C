@@ -1,6 +1,9 @@
+import datetime
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional
+from fastapi.responses import StreamingResponse
+from service.langchain_service import get_langchain_chat_service
 
 router = APIRouter()
 
@@ -197,6 +200,13 @@ def get_tasks_by_path_id(path_id: int):
 
 def get_questions_by_task_id(task_id: int):
     return [q for q in task_questions if q["task_id"] == task_id]
+
+def get_conversation_history(conversation_id: int, limit: int = 6):
+    records = [m for m in conversation_messages if m["conversation_id"] == conversation_id]
+    return records[-limit:]
+
+def now_str():
+    return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 def refresh_path_status(path_id: int):
     path = find_path_by_id(path_id)
@@ -623,7 +633,7 @@ def clear_user_conversations(user_id: int):
 # 智能问答模块
 # =========================
 
-@router.post("/api/ask", response_model=AskResponse)
+@router.post("/api/ask")
 def ask(req: AskRequest):
     user = find_user_by_id(req.user_id)
     if not user:
@@ -633,22 +643,47 @@ def ask(req: AskRequest):
     if not conversation:
         raise HTTPException(status_code=404, detail="会话不存在")
 
-    answer = f"你问的是：{req.question}。这是当前演示版返回的示例回答。"
+    # 用户和会话归属校验
+    if conversation["user_id"] != req.user_id:
+        raise HTTPException(status_code=403, detail="该会话不属于当前用户")
 
-    new_message_id = len(conversation_messages) + 1
-    conversation_messages.append({
-        "message_id": new_message_id,
-        "conversation_id": req.conversation_id,
-        "user_id": req.user_id,
-        "question": req.question,
-        "answer": answer,
-        "source": "演示版假数据来源",
-        "created_at": "2026-03-29 11:05:00"
-    })
+    history = get_conversation_history(req.conversation_id, limit=6)
 
-    conversation["latest_question"] = req.question
+    def generate():
+        answer_parts = []
+        source = "langchain_stream"
 
-    return AskResponse(answer=answer, message_id=new_message_id)
+        try:
+            for chunk in get_langchain_chat_service().chat_stream(
+                question=req.question,
+                history=history,
+            ):
+                if chunk:
+                    answer_parts.append(chunk)
+                    yield chunk
+
+            full_answer = "".join(answer_parts).strip()
+
+            new_message_id = len(conversation_messages) + 1
+            conversation_messages.append({
+                "message_id": new_message_id,
+                "conversation_id": req.conversation_id,
+                "user_id": req.user_id,
+                "question": req.question,
+                "answer": full_answer,
+                "source": source,
+                "created_at": now_str()
+            })
+
+            conversation["latest_question"] = req.question
+
+        except Exception as e:
+            yield f"\n[流式输出异常] {str(e)}"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/plain; charset=utf-8"
+    )
 
 @router.get("/api/hot-questions", response_model=List[HotQuestionItem])
 def get_hot_questions():
