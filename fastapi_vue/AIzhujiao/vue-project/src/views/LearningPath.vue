@@ -241,7 +241,7 @@ const handleReset = () => {
   form.goal = ''
   form.background = ''
   form.domain = 'other'
-  currentPath = null
+  currentPath.value = null
 }
 
 // 3. 新增：跳转函数
