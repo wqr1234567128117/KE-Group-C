@@ -1,6 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from service import api
+from dependences.db import engine
+from dependences.migrate import run_migrations
 
 router = api.router
 app = FastAPI()
@@ -16,3 +18,8 @@ app.add_middleware(
 
 # 把 api.py 里的所有接口挂载进来
 app.include_router(router)
+
+
+@app.on_event("startup")
+def _startup_migrate() -> None:
+    run_migrations(engine)

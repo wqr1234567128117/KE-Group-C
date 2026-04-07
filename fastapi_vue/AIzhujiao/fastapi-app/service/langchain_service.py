@@ -3,12 +3,14 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 from threading import Lock
-from typing import Any, Generator
+from typing import Any, Generator, TYPE_CHECKING
 
 from langchain.messages import SystemMessage, HumanMessage, AIMessage
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
-from langchain_neo4j import Neo4jGraph
+
+if TYPE_CHECKING:
+    from langchain_neo4j import Neo4jGraph
 
 from dependences.config import get_settings
 
@@ -16,7 +18,7 @@ from dependences.config import get_settings
 class LangChainChatService:
     def __init__(self) -> None:
         self.settings = get_settings()
-        self._graph: Neo4jGraph | None = None
+        self._graph: "Neo4jGraph | None" = None
         self._graph_lock = Lock()
 
     # =========================
@@ -46,10 +48,15 @@ class LangChainChatService:
             temperature=temperature,
         )
 
-    def _get_graph(self) -> Neo4jGraph:
+    def _get_graph(self) -> "Neo4jGraph":
+        if bool(getattr(self.settings, "DISABLE_NEO4J", False)):
+            raise RuntimeError("Neo4j 已在配置中禁用（DISABLE_NEO4J=true）")
         if self._graph is None:
             with self._graph_lock:
                 if self._graph is None:
+                    # 延迟导入，避免 Neo4j 可选依赖（pandas/pyarrow）在某些环境下触发 numpy ABI 问题
+                    from langchain_neo4j import Neo4jGraph
+
                     self._graph = Neo4jGraph(
                         url=self.settings.NEO4J_URI,
                         username=self.settings.NEO4J_USERNAME,

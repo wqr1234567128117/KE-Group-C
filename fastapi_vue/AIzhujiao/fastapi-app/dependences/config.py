@@ -15,6 +15,16 @@ class Settings(BaseModel):
     NEO4J_PASSWORD: str = ""
     NEO4J_DATABASE: str = "neo4j"
 
+    DISABLE_NEO4J: bool = False
+
+    # MySQL（优先使用 DATABASE_URL；否则用 MYSQL_* 组装）
+    DATABASE_URL: str | None = None
+    MYSQL_HOST: str = "127.0.0.1"
+    MYSQL_PORT: int = 3306
+    MYSQL_USER: str = "root"
+    MYSQL_PASSWORD: str = ""
+    MYSQL_DB: str = "groub_c"
+
     ENABLE_GRAPH_QA: bool = False
     GRAPH_TOP_K: int = 10
     LANGCHAIN_VERBOSE: bool = False
