@@ -1,3 +1,4 @@
+<!-- vue-project/src/components/Sidebar.vue -->
 <template>
   <div :class="['sidebar-container', { 'collapsed': isCollapsed }]">
     <!-- 折叠按钮 -->
@@ -13,7 +14,7 @@
 
     <!-- 滚动区域 -->
     <div class="scroll-area" v-if="!isCollapsed">
-      <!-- 1. 最近对话 (原有逻辑) -->
+      <!-- 1. 最近对话 (由父组件通过 props 传入) -->
       <div class="section">
         <div class="group-title">最近对话</div>
         <div
@@ -27,7 +28,7 @@
           <span class="item-title">{{ item.title }}</span>
           <span class="item-time">{{ item.time }}</span>
 
-          <!-- 只有在未折叠状态下，且鼠标悬停或菜单激活时显示操作按钮 -->
+          <!-- 操作按钮 -->
           <div
             v-if="!isCollapsed"
             class="action-btn"
@@ -38,21 +39,21 @@
         </div>
       </div>
 
-      <!-- 2. 热门问题 (新增) -->
+      <!-- 2. 热门问题 (API 获取) -->
       <div class="section hot-questions-section">
         <div class="group-title">🔥 热门问题</div>
         <div
           v-for="(item, index) in hotQuestions"
           :key="'hot-' + index"
           class="recommend-item"
-          @click="handleSelectRecommend(item.question)"
+          @click="handleSelectRecommend(item.question_content)"
         >
-          <span class="item-text">{{ item.question }}</span>
-          <span class="item-count">{{ item.count }}</span>
+          <span class="item-text">{{ item.question_content }}</span>
+          <span class="item-count">{{ item.click_count }}</span>
         </div>
       </div>
 
-      <!-- 3. 推荐问题 (新增) -->
+      <!-- 3. 推荐问题 (API 获取) -->
       <div class="section recommended-section">
         <div class="group-title">💡 推荐问题</div>
         <div
@@ -66,7 +67,7 @@
       </div>
     </div>
 
-    <!-- 全局菜单弹窗 (保持原有逻辑) -->
+    <!-- 全局菜单弹窗 -->
     <div
       v-if="activeMenuId !== null"
       class="context-menu"
@@ -96,13 +97,12 @@
 <script setup>
 import { defineProps, defineEmits, ref, onMounted } from 'vue';
 import { Icon } from '@iconify/vue';
-// 假设你有 axios，如果没有可以使用 fetch 或你项目中的 request 实例
-import axios from 'axios';
+import api from '../api/index'; // 引入统一封装的 API
 
 // ---------- Props & Emits ----------
 const props = defineProps({
   history: { type: Array, required: true },
-  currentChatId: { type: Number, required: true },
+  currentChatId: { type: [String, Number], required: true }, // 兼容 String 类型的 ID
   modelValue: { type: Boolean, default: false },
 });
 
@@ -113,41 +113,40 @@ const isCollapsed = ref(props.modelValue);
 const activeMenuId = ref(null);
 const menuStyle = ref({ top: '0px', left: '0px' });
 
-// 新增状态：热门与推荐数据
+// 数据状态
 const hotQuestions = ref([]);
 const recommendedQuestions = ref([]);
 
 // ---------- 生命周期 ----------
 onMounted(() => {
-  // 组件挂载后获取侧边栏数据
   fetchSidebarData();
   document.addEventListener('click', handleOutsideClick);
 });
 
 // ---------- 方法 ----------
 
-// 1. 获取侧边栏数据 (热门/推荐)
+// 1. 获取侧边栏数据
 const fetchSidebarData = async () => {
   try {
-    // 模拟后端调用，请替换为真实的 API
-    // const hotRes = await axios.get('/api/hot-questions');
-    // const recRes = await axios.get('/api/recommended-questions');
+    // 并行请求两个接口
+    const [hotRes, recRes] = await Promise.all([
+      api.getHotQuestions(),
+      api.getSuggestions()
+    ]);
 
-    // 这里使用模拟数据演示
-    hotQuestions.value = [
-      { question: '方剂数据字段如何映射？', count: '1.2k' },
-      { question: '中医知识库代码修改建议', count: '856' },
-      { question: '针灸分级授权模型设计', count: '430' }
-    ];
+    // 映射热门问题
+    // 假设后端返回结构: [{question_content: "...", click_count: 100}, ...]
+    hotQuestions.value = hotRes.data; 
 
-    recommendedQuestions.value = [
-      '帮我梳理一下药材组成的映射逻辑',
-      '设计一个权限模型',
-      '分析这段代码的潜在Bug'
-    ];
+    // 映射推荐问题
+    // 假设后端返回结构: ["问题A", "问题B", ...]
+    recommendedQuestions.value = recRes.data;
 
   } catch (error) {
     console.error('获取侧边栏数据失败:', error);
+    // 可以在这里设置默认值，防止界面空白
+    hotQuestions.value = [];
+    recommendedQuestions.value = [];
   }
 };
 
@@ -168,7 +167,6 @@ const handleSelectChat = (id) => {
 
 // 2. 处理点击推荐/热门问题
 const handleSelectRecommend = (questionText) => {
-  // 向父组件发送事件，告知用户选择了一个推荐问题
   emit('select-recommend', questionText);
 };
 
@@ -217,8 +215,9 @@ const handleOutsideClick = () => {
 </script>
 
 <style scoped>
+/* 样式保持不变，仅做微调以适配新内容 */
 .sidebar-container {
-  width: 280px; /* 稍微加宽以适应新内容 */
+  width: 280px;
   background-color: #202123;
   color: #fff;
   display: flex;
@@ -257,7 +256,6 @@ const handleOutsideClick = () => {
   background-color: #40414f;
 }
 
-/* 滚动区域 */
 .scroll-area {
   flex: 1;
   overflow-y: auto;
@@ -276,7 +274,6 @@ const handleOutsideClick = () => {
   font-weight: 600;
 }
 
-/* 历史记录样式 */
 .history-item {
   padding: 10px 16px;
   display: flex;
@@ -331,7 +328,6 @@ const handleOutsideClick = () => {
   border-radius: 4px;
 }
 
-/* 操作按钮 */
 .action-btn {
   margin-left: auto;
   padding: 4px;
@@ -348,7 +344,6 @@ const handleOutsideClick = () => {
   color: #fff;
 }
 
-/* 菜单样式保持不变 */
 .context-menu {
   position: fixed;
   width: 160px;
@@ -385,7 +380,6 @@ const handleOutsideClick = () => {
   background-color: rgba(255, 107, 107, 0.1);
 }
 
-/* 隐藏滚动条 */
 .scroll-area::-webkit-scrollbar {
   display: none;
 }
