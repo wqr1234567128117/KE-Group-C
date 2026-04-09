@@ -52,10 +52,10 @@ class LearningPath(Base):
 
     path_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.user_id"), nullable=False)
-    estimated_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[str | None] = mapped_column(String(30), nullable=True)
     current_task_point: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    goal: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    goal: Mapped[str | None] = mapped_column(Text, nullable=True)
+    background_plan: Mapped[str | None] = mapped_column(String(255), nullable=True)
     level: Mapped[str | None] = mapped_column(String(50), nullable=True)
     domain: Mapped[str | None] = mapped_column(String(50), nullable=True)
     created_at: Mapped[object | None] = mapped_column(DateTime, nullable=True)
@@ -67,6 +67,7 @@ class PathTask(Base):
 
     task_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     path_id: Mapped[int] = mapped_column(Integer, ForeignKey("learning_paths.path_id"), nullable=False)
+    progress_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("learning_progress.progress_id"), nullable=True)
     task_name: Mapped[str] = mapped_column(String(100), nullable=False)
     task_description: Mapped[str | None] = mapped_column(Text, nullable=True)
     task_order: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -92,10 +93,9 @@ class LearningProgress(Base):
     __tablename__ = "learning_progress"
 
     progress_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    path_id: Mapped[int] = mapped_column(Integer, ForeignKey("learning_paths.path_id"), nullable=False)
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.user_id"), nullable=False)
-    path_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    task_type: Mapped[str | None] = mapped_column(String(30), nullable=True)
-    related_task_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    study_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    record_time: Mapped[object | None] = mapped_column(DateTime, nullable=True)
-    progress_note: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    progress_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    progress_description: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    progress_order: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[object | None] = mapped_column(DateTime, nullable=True)

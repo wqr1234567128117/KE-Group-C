@@ -25,7 +25,7 @@ class LangChainChatService:
     # 基础能力
     # =========================
     def _project_root(self) -> Path:
-        # service/langchain_service.py -> 项目根目录
+        # service/langchain_chat_service.py -> 项目根目录
         return Path(__file__).resolve().parent.parent
 
     def _read_prompt(self, filename: str) -> str:
