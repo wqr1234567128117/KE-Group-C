@@ -691,160 +691,16 @@ class LearningPathDetailResponse(BaseModel):
     tasks: list[PathTaskItem]
 
 
-# @router.post("/api/learning-path/generate", response_model=LearningPathDetailResponse)
-# def generate_learning_path(
-#     req: LearningPathGenerateRequest,
-#     db: Session = Depends(get_db),
-#     current_user: DbUser = Depends(get_current_user),
-# ):
-#     user_id = req.user_id or current_user.user_id
-#     if user_id != current_user.user_id:
-#         raise HTTPException(status_code=403, detail="禁止访问其他用户数据")
-#
-#     try:
-#         learning_path_service = get_learning_path_service()
-#
-#         generated_result = learning_path_service.generate_learning_path(
-#             field=req.domain,
-#             goal=req.goal,
-#             level=req.level,
-#             background_plan=req.background_plan,
-#             user_id=user_id,
-#         )
-#
-#         flat_tasks = _flatten_generated_tasks(generated_result)
-#
-#         now = datetime.datetime.now()
-#
-#         first_stage_title = ""
-#         stages = generated_result.get("stages", [])
-#         if isinstance(stages, list) and stages:
-#             first_stage = stages[0] if isinstance(stages[0], dict) else {}
-#             first_stage_title = (
-#                 first_stage.get("stage_title")
-#                 or first_stage.get("title")
-#                 or ""
-#             )
-#
-#         path = DbLearningPath(
-#             user_id=user_id,
-#             status=first_stage_title or "",
-#             current_task_point=flat_tasks[0]["task_name"] if flat_tasks else None,
-#             created_at=now,
-#             updated_at=now,
-#         )
-#         setattr(path, "goal", req.goal)
-#         setattr(path, "level", req.level)
-#         setattr(path, "domain", req.domain)
-#         setattr(path, "background_plan", req.background_plan)
-#
-#         db.add(path)
-#         db.flush()
-#
-#         created_tasks: list[DbPathTask] = []
-#         for item in flat_tasks:
-#             t = DbPathTask(
-#                 path_id=path.path_id,
-#                 task_name=item["task_name"],
-#                 task_description=item.get("task_description", ""),
-#                 task_order=item.get("task_order", 0),
-#                 is_completed=0,
-#                 created_at=now,
-#                 updated_at=now,
-#             )
-#             db.add(t)
-#             created_tasks.append(t)
-#
-#         db.flush()
-#
-#         for db_task, task_payload in zip(created_tasks, flat_tasks):
-#             questions = task_payload.get("questions", [])
-#             if not isinstance(questions, list):
-#                 questions = []
-#
-#             if not questions:
-#                 q = DbTaskQuestion(
-#                     task_id=db_task.task_id,
-#                     question_text="",
-#                     correct_answer="",
-#                     is_passed=0,
-#                     user_answer="",
-#                     created_at=now,
-#                     updated_at=now,
-#                 )
-#                 db.add(q)
-#                 continue
-#
-#             for question in questions:
-#                 question_text, correct_answer = _normalize_question_row(
-#                     question=question,
-#                     fallback_task_name=db_task.task_name,
-#                 )
-#                 q = DbTaskQuestion(
-#                     task_id=db_task.task_id,
-#                     question_text=question_text,
-#                     correct_answer=correct_answer,
-#                     is_passed=0,
-#                     user_answer="",
-#                     created_at=now,
-#                     updated_at=now,
-#                 )
-#                 db.add(q)
-#
-#         db.commit()
-#         db.refresh(path)
-#
-#         tasks = (
-#             db.execute(
-#                 select(DbPathTask)
-#                 .where(DbPathTask.path_id == path.path_id)
-#                 .order_by(DbPathTask.task_order.asc(), DbPathTask.task_id.asc())
-#             )
-#             .scalars()
-#             .all()
-#         )
-#
-#         resp_path = LearningPathResponse(
-#             path_id=path.path_id,
-#             user_id=path.user_id,
-#             goal=getattr(path, "goal", "") or "",
-#             domain=getattr(path, "domain", "") or "",
-#             level=getattr(path, "level", "") or "",
-#             status=path.status or "",
-#             created_at=path.created_at.isoformat(sep=" ", timespec="seconds") if path.created_at else None,
-#         )
-#
-#         resp_tasks = [
-#             PathTaskItem(
-#                 task_id=t.task_id,
-#                 task_name=t.task_name,
-#                 description=t.task_description or "",
-#                 order_no=t.task_order or 0,
-#                 is_completed=bool(t.is_completed),
-#             )
-#             for t in tasks
-#         ]
-#
-#         return LearningPathDetailResponse(path=resp_path, tasks=resp_tasks)
-#
-#     except ValueError as e:
-#         db.rollback()
-#         raise HTTPException(status_code=400, detail=f"学习路径生成失败: {str(e)}")
-#     except Exception as e:
-#         db.rollback()
-#         raise HTTPException(status_code=500, detail=f"学习路径生成异常: {str(e)}")
-
 @router.post("/api/learning-path/generate", response_model=LearningPathDetailResponse)
 def generate_learning_path(
     req: LearningPathGenerateRequest,
     db: Session = Depends(get_db),
+    current_user: DbUser = Depends(get_current_user),
 ):
     # 测试阶段先固定用户；前端接好鉴权后再改回 Depends(get_current_user)
-    current_user = db.get(DbUser, 1)
-    if not current_user:
-        raise HTTPException(status_code=404, detail="测试用户不存在，请先创建 user_id=1 的用户")
-
-    user_id = current_user.user_id
+    user_id = req.user_id or current_user.user_id
+    if user_id != current_user.user_id:
+        raise HTTPException(status_code=403, detail="禁止访问其他用户数据")
 
     try:
         learning_path_service = get_learning_path_service()
