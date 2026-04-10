@@ -76,14 +76,22 @@ export default {
   },
 
   // --- 学习路径模块 ---
-  // 生成路径：后端需要 domain, level, days, goal
-  generatePath(domain, level, days, goal) {
-    return apiClient.post('/api/learning-path/generate', { 
-      domain, 
-      level, 
-      days, 
-      goal 
-    });
+  generatePath(data) {
+    const {
+      user_id,
+      domain,
+      level,
+      goal,
+      background_plan,
+    } = data
+
+    return apiClient.post('/api/learning-path/generate', {
+      user_id,
+      domain,
+      level,
+      goal,
+      background_plan,
+    })
   },
   // 获取路径列表
   getPaths(userId) {

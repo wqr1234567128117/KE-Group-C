@@ -1,100 +1,76 @@
 <script setup>
 import { ref, watch, nextTick } from 'vue';
+import { useRouter } from 'vue-router';
 
-// --- Props 接收 (如果父组件传递历史记录) ---
 const props = defineProps({
   chatContent: {
     type: Array,
     default: () => []
+  },
+  loading: {
+    type: Boolean,
+    default: false,
   }
 });
 
-// --- 状态管理 ---
-// 注意：为了防止混淆，我们统一使用 inputMessage
+const router = useRouter();
 const inputMessage = ref('');
-const isSending = ref(false);
 const isHomeworkMode = ref(false);
 const bottomAnchor = ref(null);
+const currentPage = ref('qa');
 
-// --- 事件定义 ---
-// 定义向父组件发送消息的事件
 const emit = defineEmits(['send-message']);
 
-// --- 方法 ---
-
-// 切换作业模式
 const toggleHomeworkMode = () => {
   isHomeworkMode.value = !isHomeworkMode.value;
 };
 
-// 发送消息处理
-const handleSend = async () => {
-  // 1. 获取输入框内容并校验
-  // 注意：这里修正了变量名，统一使用 inputMessage
-  const text = inputMessage.value.trim(); 
-  if (!text || isSending.value) return;
+const handleSend = () => {
+  const text = inputMessage.value.trim();
+  if (!text || props.loading) return;
 
-  // 2. 重置发送状态
-  isSending.value = true;
+  emit('send-message', {
+    content: text,
+    isHomework: isHomeworkMode.value,
+  });
 
-  try {
-    // 3. 调用父组件逻辑 (发送用户消息)
-    // 这里将内容和模式传给父组件处理
-    await emit('send-message', { 
-      content: text, 
-      isHomework: isHomeworkMode.value 
-    });
-
-    // 4. 清空输入框，准备下一次输入
-    inputMessage.value = '';
-    
-  } catch (error) {
-    console.error('消息发送失败:', error);
-    // 这里可以添加 UI 提示，但通常在父组件处理错误
-  } finally {
-    isSending.value = false;
-  }
+  inputMessage.value = '';
 };
 
-// --- 自动滚动 ---
-// 监听 DOM 变化，自动滚动到底部
-watch(() => props.chatContent, async () => {
+const handlePageChange = () => {
+  if (currentPage.value === 'learning-path') {
+    router.push('/learning-path');
+    return;
+  }
+  router.push('/smart-qa');
+};
+
+watch(() => props.chatContent.length, async () => {
   await nextTick();
   if (bottomAnchor.value) {
-    bottomAnchor.value.scrollIntoView({ behavior: 'smooth' });
+    bottomAnchor.value.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }
 }, { immediate: true });
 </script>
 
 <template>
   <main class="chat-window">
-    <!-- 顶部导航栏 -->
     <header class="chat-header">
       <div class="header-left">
-        <div class="model-selector">
-          <span>智能助教问答</span>
-          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="6 9 12 15 18 9"></polyline>
-          </svg>
-        </div>
-      </div>
-      <div class="header-right">
-        <button class="btn">下载电脑版</button>
-        <button class="btn">API 服务</button>
-        <div class="theme-toggle">🌙</div>
+        <label class="page-selector-wrap">
+          <select v-model="currentPage" class="page-selector" @change="handlePageChange">
+            <option value="qa">智能助教问答</option>
+            <option value="learning-path">学习路径生成</option>
+          </select>
+        </label>
       </div>
     </header>
 
-    <!-- 聊天内容区 -->
     <section class="chat-content">
-      <!-- 欢迎页或聊天记录列表 -->
-      <!-- 注意：这里使用 v-if 判断 props.chatContent，确保父子数据同步 -->
       <div v-if="props.chatContent.length === 0" class="welcome-screen">
         <h1>你好，我是助教AI</h1>
-        
-        <!-- 输入区域 (欢迎页专用) -->
-        
-        
+        <p class="welcome-tip">输入问题后，我会先显示“正在思考中”，再返回正式回答。</p>
+
         <div class="quick-actions">
           <span>任务助理</span>
           <span>深度思考</span>
@@ -105,75 +81,74 @@ watch(() => props.chatContent, async () => {
         </div>
       </div>
 
-      <!-- 消息列表 -->
-      <!-- 这里渲染父组件传入的 chatContent -->
-      <div class="messages-list">
-        <div 
-          v-for="(msg, index) in props.chatContent" 
-          :key="index" 
-          class="message-item" 
-          :class="[msg.role, { 'message-error': msg.error }]"
+      <div class="messages-list" v-else>
+        <div
+          v-for="(msg, index) in props.chatContent"
+          :key="index"
+          class="message-item"
+          :class="[msg.role, { 'message-error': msg.error, 'message-thinking': msg.thinking }]"
         >
-          <!-- 头像 -->
           <div class="avatar">
             {{ msg.role === 'user' ? '👤' : '🤖' }}
           </div>
 
-          <!-- 内容盒子 -->
           <div class="content-box">
-            <div class="content" v-text="msg.content"></div>
-            <!-- 错误提示 -->
+            <template v-if="msg.thinking">
+              <div class="thinking-content">
+                <span class="thinking-text">正在思考中</span>
+                <span class="thinking-dots">
+                  <i></i><i></i><i></i>
+                </span>
+              </div>
+            </template>
+            <div v-else class="content" v-text="msg.content"></div>
             <div class="error-tip" v-if="msg.error">
               ❌ {{ msg.content }}
             </div>
           </div>
         </div>
-        
-        <!-- 滚动锚点 -->
+
         <div ref="bottomAnchor"></div>
       </div>
     </section>
 
-    <!-- 底部快捷功能 -->
     <footer class="chat-footer">
       <div class="input-area">
-          <input 
-            type="text" 
-            v-model="inputMessage" 
-            @keyup.enter="handleSend" 
-            placeholder="向助教AI提问" 
-            :disabled="isSending" 
-          />
-          <button 
-            class="send-btn" 
-            @click="handleSend" 
-            :disabled="isSending || !inputMessage.trim()"
-          >
-            {{ isSending ? '发送中...' : '发送' }}
-          </button>
-          <button 
-            class="homework-btn" 
-            :class="{ active: isHomeworkMode }" 
-            @click="toggleHomeworkMode"
-          >
-            {{ isHomeworkMode ? '普通模式' : '作业辅导' }}
-          </button>
+        <input
+          type="text"
+          v-model="inputMessage"
+          @keyup.enter="handleSend"
+          placeholder="向助教AI提问"
+          :disabled="props.loading"
+        />
+        <button
+          class="send-btn"
+          @click="handleSend"
+          :disabled="props.loading || !inputMessage.trim()"
+        >
+          {{ props.loading ? '思考中...' : '发送' }}
+        </button>
+        <button
+          class="homework-btn"
+          :class="{ active: isHomeworkMode }"
+          @click="toggleHomeworkMode"
+          :disabled="props.loading"
+        >
+          {{ isHomeworkMode ? '普通模式' : '作业辅导' }}
+        </button>
       </div>
-      
     </footer>
   </main>
 </template>
 
 <style scoped>
-/* --- 样式保持不变 (为了节省篇幅，这里省略样式部分，使用你原有的样式即可) --- */
-/* 你的原有样式已经很完善，无需修改，请保留原样 */
 .chat-window {
   flex: 1;
   display: flex;
   flex-direction: column;
   background: #fff;
-  overflow: hidden; /* 确保内部溢出被隐藏 */
-  height: 100%; 
+  overflow: hidden;
+  height: 100%;
   width: 100%;
 }
 
@@ -181,43 +156,52 @@ watch(() => props.chatContent, async () => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 10px 20px;
+  padding: 14px 20px;
   border-bottom: 1px solid #eee;
   background: #fff;
-  flex-shrink: 0; /* 防止头部被压缩 */
+  flex-shrink: 0;
 }
 
-.model-selector {
+.header-left {
   display: flex;
   align-items: center;
+}
+
+.page-selector-wrap {
+  position: relative;
+}
+
+.page-selector {
+  appearance: none;
+  min-width: 168px;
+  height: 38px;
+  padding: 0 36px 0 14px;
+  border: 1px solid #d9d9d9;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #ffffff 0%, #f8f5ff 100%);
+  color: #333;
   font-size: 14px;
-  color: #333;
+  font-weight: 600;
   cursor: pointer;
+  outline: none;
 }
 
-.model-selector svg {
-  margin-left: 4px;
-}
-
-.header-right .btn {
-  background: none;
-  border: 1px solid #ddd;
-  padding: 4px 8px;
-  margin-left: 10px;
-  font-size: 12px;
-  color: #333;
-  cursor: pointer;
-}
-
-.theme-toggle {
-  margin-left: 10px;
-  cursor: pointer;
+.page-selector-wrap::after {
+  content: '⌄';
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-52%);
+  color: #6f42c1;
+  pointer-events: none;
+  font-size: 16px;
 }
 
 .chat-content {
   flex: 1;
   overflow-y: auto;
   padding: 20px 0;
+  background: linear-gradient(180deg, #fafafa 0%, #ffffff 100%);
 }
 
 .welcome-screen {
@@ -226,12 +210,19 @@ watch(() => props.chatContent, async () => {
   width: 100%;
   max-width: 700px;
   margin: 0 auto;
+  padding: 24px 20px;
 }
 
 .welcome-screen h1 {
-  font-size: 24px;
-  font-weight: 500;
-  margin-bottom: 30px;
+  font-size: 28px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+.welcome-tip {
+  color: #666;
+  font-size: 14px;
+  margin-bottom: 28px;
 }
 
 .quick-actions {
@@ -244,22 +235,20 @@ watch(() => props.chatContent, async () => {
 
 .quick-actions span {
   background: #fff;
-  padding: 4px 8px;
-  border-radius: 4px;
+  padding: 8px 12px;
+  border-radius: 999px;
   font-size: 12px;
   color: #555;
   cursor: pointer;
   border: 1px solid #eee;
 }
 
-/* --- 消息列表样式 --- */
 .messages-list {
   padding: 0 20px;
   display: flex;
   flex-direction: column;
   gap: 16px;
   flex: 1;
-  overflow-y: auto;
 }
 
 .message-item {
@@ -279,36 +268,90 @@ watch(() => props.chatContent, async () => {
 
 .message-item.user .content-box {
   background: #e6f4ff;
-  border-radius: 12px;
+  border-radius: 14px;
   padding: 12px 16px;
-  max-width: 80%;
+  max-width: min(80%, 760px);
   align-self: flex-end;
 }
 
 .message-item.assistant .content-box {
   background: #f5f5f5;
-  border-radius: 12px;
+  border-radius: 14px;
   padding: 12px 16px;
-  max-width: 80%;
+  max-width: min(80%, 760px);
   align-self: flex-start;
 }
 
+.message-item.message-thinking .content-box {
+  background: #f7f3ff;
+  border: 1px solid #ebe2ff;
+}
+
 .avatar {
-  width: 32px;
-  height: 32px;
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 18px;
   flex-shrink: 0;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
 }
 
 .content-box {
   color: #333;
-  line-height: 1.5;
+  line-height: 1.7;
   font-size: 14px;
   position: relative;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.04);
+}
+
+.content {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.thinking-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #6f42c1;
+  font-weight: 500;
+}
+
+.thinking-dots {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.thinking-dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #6f42c1;
+  display: block;
+  animation: dotPulse 1.2s infinite ease-in-out;
+}
+
+.thinking-dots i:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.thinking-dots i:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes dotPulse {
+  0%, 80%, 100% {
+    transform: scale(0.7);
+    opacity: 0.5;
+  }
+  40% {
+    transform: scale(1);
+    opacity: 1;
+  }
 }
 
 .error-tip {
@@ -317,23 +360,23 @@ watch(() => props.chatContent, async () => {
   margin-top: 4px;
 }
 
-/* --- 输入区域样式 --- */
 .input-area {
   display: flex;
   align-items: center;
-  width: 600px;
-  max-width: 90%;
-  height: 52px;
+  width: 720px;
+  max-width: calc(100% - 32px);
+  min-height: 56px;
   background: #fff;
   border: 1px solid #e0e0e0;
-  border-radius: 26px;
-  padding: 4px;
+  border-radius: 28px;
+  padding: 6px;
   box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-  margin: 0 auto 20px;
+  margin: 0 auto 16px;
 }
 
 .input-area:focus-within {
-  border-color: #1677ff;
+  border-color: #6f42c1;
+  box-shadow: 0 4px 16px rgba(111, 66, 193, 0.12);
 }
 
 .input-area input {
@@ -347,30 +390,31 @@ watch(() => props.chatContent, async () => {
 }
 
 .send-btn {
-  width: 80px;
+  width: 90px;
   height: 44px;
-  background: #1677ff;
+  background: linear-gradient(135deg, #7c4dff 0%, #6f42c1 100%);
   color: white;
   border: none;
   border-radius: 22px;
   cursor: pointer;
   font-size: 14px;
-  font-weight: 500;
-  transition: background 0.2s;
+  font-weight: 600;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
 .send-btn:hover:not(:disabled) {
-  background: #0958d9;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(111, 66, 193, 0.22);
 }
 
 .send-btn:disabled {
   background: #ccc;
   cursor: not-allowed;
+  box-shadow: none;
 }
 
-/* 新增：作业辅导按钮样式 */
 .homework-btn {
-  height: 36px;
+  height: 38px;
   padding: 0 16px;
   margin-left: 10px;
   background: transparent;
@@ -383,41 +427,29 @@ watch(() => props.chatContent, async () => {
   white-space: nowrap;
 }
 
-.homework-btn:hover {
-  border-color: #1677ff;
-  color: #1677ff;
+.homework-btn:hover:not(:disabled) {
+  border-color: #6f42c1;
+  color: #6f42c1;
 }
 
 .homework-btn.active {
-  background: #e6f4ff;
-  border-color: #1677ff;
-  color: #1677ff;
-  font-weight: 500;
+  background: #f3ecff;
+  border-color: #6f42c1;
+  color: #6f42c1;
+  font-weight: 600;
+}
+
+.homework-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .chat-footer {
   display: flex;
   justify-content: center;
-  gap: 30px;
   padding: 15px 0;
   border-top: 1px solid #eee;
   background: #fff;
-}
-
-.footer-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  color: #555;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.footer-item:hover {
-  color: #1677ff;
-}
-
-.footer-item svg {
-  margin-bottom: 4px;
+  flex-shrink: 0;
 }
 </style>
