@@ -91,13 +91,33 @@
         <span>删除</span>
       </div>
     </div>
+    <!-- ✅ 修改 5: 新增：内联重命名输入框 (直接放在 body 后面，利用 fixed 定位) -->
+    <div 
+      v-if="isRenamingInline" 
+      class="inline-rename-input" 
+      :class="{ 'force-float': isRenamingInline }"
+      :style="menuStyle" 
+      @click.stop
+    >
+      <ElInput
+        ref="renameInputRef"
+        v-model="renameInputValue"
+        size="small"
+        @keyup.enter="confirmRenameInline"
+        @blur="cancelRenameInline" 
+      />
+      <!-- 可选：添加确定/取消按钮，或者只靠回车/失焦 -->
+      <!-- <ElButton size="small" @click="confirmRenameInline">确定</ElButton> -->
+    </div>
   </div>
 </template>
 
 <script setup>
-import { defineProps, defineEmits, ref, onMounted } from 'vue';
+import { defineProps, defineEmits, ref, nextTick, onMounted } from 'vue';
 import { Icon } from '@iconify/vue';
 import api from '../api/index'; // 引入统一封装的 API
+import { ElDialog, ElInput, ElButton } from 'element-plus'
+
 
 // ---------- Props & Emits ----------
 const props = defineProps({
@@ -116,6 +136,11 @@ const menuStyle = ref({ top: '0px', left: '0px' });
 // 数据状态
 const hotQuestions = ref([]);
 const recommendedQuestions = ref([]);
+
+// --- 新增：重命名相关的状态 ---
+const isRenamingInline = ref(false); // 标记是否正在内联编辑
+const renameInputValue = ref('');
+const renamingTargetId = ref(null);
 
 // ---------- 生命周期 ----------
 onMounted(() => {
@@ -136,7 +161,11 @@ const fetchSidebarData = async () => {
 
     // 映射热门问题
     // 假设后端返回结构: [{question_content: "...", click_count: 100}, ...]
-    hotQuestions.value = hotRes.data; 
+    // hotQuestions.value = hotRes.data; 
+    hotQuestions.value = hotRes.data.map(item => ({
+      question_content: item.question || '暂无问题',
+      click_count: item.count || 0
+    }));
 
     // 映射推荐问题
     // 假设后端返回结构: ["问题A", "问题B", ...]
@@ -187,9 +216,46 @@ const closeMenu = () => {
   activeMenuId.value = null;
 };
 
-const handleRename = () => {
-  emit('rename-chat', activeMenuId.value);
-  closeMenu();
+const handleRename = async () => {
+  const targetId = activeMenuId.value;
+  if (!targetId) return;
+
+  // 1. 找到当前标题
+  const targetItem = props.history.find(item => item.id === targetId);
+  const currentTitle = targetItem ? targetItem.title || targetItem.session_title : '';
+  
+  // 2. 初始化内联编辑状态
+  renameInputValue.value = currentTitle;
+  renamingTargetId.value = targetId;
+  isRenamingInline.value = true; // 显示输入框
+
+  // 3. 关闭原来的右键菜单，因为我们现在要在旁边显示输入框
+  activeMenuId.value = null;
+
+  // 4. 等待 DOM 更新，聚焦输入框
+  await nextTick();
+  if (renameInputRef.value) {
+    renameInputRef.value.focus();
+  }
+};
+
+// --- 修改 3: 新增 confirmRenameInline ---
+const confirmRenameInline = () => {
+  // if (renamingTargetId.value) {
+  //   emit('rename-chat', renamingTargetId.value, renameInputValue.value);
+  // }
+  if (renamingTargetId.value && renameInputValue.value.trim()) {
+    emit('rename-chat', renamingTargetId.value, renameInputValue.value.trim());
+  }
+  // 重置状态
+  isRenamingInline.value = false;
+  renamingTargetId.value = null;
+};
+
+// --- 修改 4: 新增 cancelRenameInline ---
+const cancelRenameInline = () => {
+  isRenamingInline.value = false;
+  renamingTargetId.value = null;
 };
 
 const handlePin = () => {
@@ -382,5 +448,45 @@ const handleOutsideClick = () => {
 
 .scroll-area::-webkit-scrollbar {
   display: none;
+}
+.inline-rename-input {
+  position: absolute;
+  z-index: 9999; /* 修改点：大幅提升层级，确保盖住右侧组件 */
+  
+  /* 其他原有样式保持不变 */
+  background-color: #1f1f1f;
+  border: 1px solid #444;
+  border-radius: 8px;
+  padding: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  width: 200px;
+}
+
+
+.inline-rename-input.force-float {
+  position: fixed !important; 
+  z-index: 99999 !important;  
+  
+  /* 视觉美化 */
+  background-color: #1f1f1f;
+  border: 1px solid #444;
+  border-radius: 8px;
+  padding: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.8); 
+  width: auto;
+  
+}
+
+/* 穿透修改 Element Plus 样式，确保输入框透明 */
+.inline-rename-input ::v-deep(.el-input__wrapper) {
+  background-color: transparent !important;
+  box-shadow: none !important;
+  border: none;
+  padding: 0;
+}
+
+/* 文字颜色白色 */
+.inline-rename-input ::v-deep(input) {
+  color: #000000;
 }
 </style>

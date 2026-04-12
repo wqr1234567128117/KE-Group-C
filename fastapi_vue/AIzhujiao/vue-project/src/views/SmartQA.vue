@@ -18,7 +18,10 @@ const loadConversations = async () => {
     const list = Array.isArray(res.data) ? res.data : (res.data?.data || []);
     conversations.value = list.map(item => ({
       id: item.session_id,
-      title: item.latest_question ? item.latest_question.substring(0, 20) : '新对话',
+      // 优先使用 session_title，为空则使用 latest_question
+      title: item.session_title 
+        ? item.session_title 
+        : (item.latest_question ? item.latest_question.substring(0, 20) : '新对话'),
       time: item.latest_asked_at,
     }));
 
@@ -150,7 +153,22 @@ const handleSelectRecommend = (question) => {
   handleSendMessage({ content: question, isHomework: false });
 };
 
-const handleRenameChat = () => {};
+const handleRenameChat = async (chatId, newTitle) => {
+  try {
+    
+    const response = await api.renameConversation(chatId, newTitle);
+    
+    const conversation = conversations.value.find(item => item.id === chatId);
+    if (conversation) {
+      conversation.title = newTitle.trim() ? newTitle.trim() : conversation.title; 
+    }
+    
+    console.log('重命名成功:', response.data.message);
+  } catch (error) {
+    console.error('重命名失败:', error);
+  }
+};
+
 const handlePinChat = () => {};
 const handleShareChat = () => {};
 const handleDeleteChat = () => {};

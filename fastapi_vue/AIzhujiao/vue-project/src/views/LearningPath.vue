@@ -502,21 +502,29 @@ const viewPath = async (record) => {
   }
 }
 
+
 const deletePath = async (pathId) => {
-  if (!confirm('确定要删除这条记录吗？')) return
-  if (typeof api.deletePath !== 'function') {
-    alert('当前 index.js 里还没有配置 deletePath 接口')
-    return
-  }
+  // 1. 确认操作
+  if (!confirm('确定要删除这条记录吗？')) return;
+
   try {
-    await api.deletePath(pathId)
-    learningHistory.value = learningHistory.value.filter((item) => item.path_id !== pathId)
-    alert('删除成功')
+    // 2. 调用删除接口
+    await api.deletePath(pathId);
+    
+    // 3. 更新前端列表
+    learningHistory.value = learningHistory.value.filter((item) => item.path_id !== pathId);
+    
+    // 4. 提示成功
+    alert('删除成功');
+    
   } catch (error) {
-    console.error('删除失败:', error)
-    alert('删除失败')
+    // 5. 错误处理
+    console.error('删除失败:', error);
+    alert('删除失败：' + (error.response?.data?.detail || '网络错误'));
+    // 注意：如果删除失败，这里不执行过滤操作，保持列表原样
   }
 }
+
 
 const handleReset = () => {
   form.goal = ''

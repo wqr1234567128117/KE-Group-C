@@ -49,7 +49,14 @@ export default {
       session_id: sessionId // 如果为空，后端会自动生成
     });
   },
-  // 获取用户的所有会话列表 (用于左侧会话栏)
+  
+  // 新增：重命名会话 API
+  renameConversation(sessionId, newTitle) {
+    return apiClient.patch(`/api/conversation/${sessionId}`, { 
+      title: newTitle 
+    });
+  },
+  // 获取用户的所有会话列表 (用于左侧会话栏,接收后端返回的 session_title）)
   getConversations(userId) {
     return apiClient.get(`/api/conversations/${userId}`);
   },
@@ -100,6 +107,10 @@ export default {
   // 获取路径详情 (包含任务)
   getPathDetail(pathId) {
     return apiClient.get(`/api/learning-path/detail/${pathId}`);
+  },
+  // 新增：删除学习路径(包含任务)
+  deletePath(pathId) {
+    return apiClient.delete(`/api/learning-path/${pathId}`);
   },
 
   // --- 学习进度与任务模块 ---
