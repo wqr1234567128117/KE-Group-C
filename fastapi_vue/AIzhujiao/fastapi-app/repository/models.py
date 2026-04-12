@@ -26,6 +26,7 @@ class ChatRecord(Base):
     record_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.user_id"), nullable=False)
     session_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    session_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     qa_content: Mapped[str | None] = mapped_column(Text, nullable=True)
     question_content: Mapped[str] = mapped_column(Text, nullable=False)
     answer_content: Mapped[str | None] = mapped_column(Text, nullable=True)

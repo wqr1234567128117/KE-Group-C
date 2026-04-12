@@ -340,6 +340,10 @@ class ConversationItem(BaseModel):
     session_id: str
     user_id: int
     latest_question: str
+    session_title: Optional[str] = Field(
+        default=None,
+        description="自定义会话标题；为空则前端可用 latest_question 作为展示名",
+    )
     latest_asked_at: Optional[str] = None
 
 
@@ -388,11 +392,51 @@ def list_conversations(
             session_id=r.session_id or "",
             user_id=r.user_id,
             latest_question=r.question_content,
+            session_title=(t.strip() if (t := getattr(r, "session_title", None) or "") else None),
             latest_asked_at=r.asked_at.isoformat(sep=" ", timespec="seconds") if r.asked_at else None,
         )
         for r in rows
         if r.session_id
     ]
+
+
+class RenameConversationRequest(BaseModel):
+    title: str = Field(
+        "",
+        max_length=255,
+        description="新标题；全空白则清除自定义标题（列表仍用最新一问展示）",
+    )
+
+
+@router.patch("/api/conversation/{session_id}")
+def rename_conversation(
+    session_id: str,
+    req: RenameConversationRequest,
+    db: Session = Depends(get_db),
+    current_user: DbUser = Depends(get_current_user),
+):
+    stripped = (req.title or "").strip()
+    new_title: str | None = stripped if stripped else None
+
+    n = db.execute(
+        select(func.count(DbChatRecord.record_id)).where(
+            DbChatRecord.session_id == session_id,
+            DbChatRecord.user_id == current_user.user_id,
+        )
+    ).scalar_one()
+    if int(n or 0) == 0:
+        raise HTTPException(status_code=404, detail="会话不存在或无权访问")
+
+    db.execute(
+        update(DbChatRecord)
+        .where(
+            DbChatRecord.session_id == session_id,
+            DbChatRecord.user_id == current_user.user_id,
+        )
+        .values(session_title=new_title)
+    )
+    db.commit()
+    return {"message": "已更新", "session_id": session_id, "session_title": new_title}
 
 
 @router.get("/api/conversation/{session_id}", response_model=List[ConversationMessageItem])
@@ -455,6 +499,16 @@ def ask(
 
     session_id = req.session_id or uuid.uuid4().hex
 
+    prev_title_raw = db.execute(
+        select(DbChatRecord.session_title)
+        .where(DbChatRecord.user_id == user_id, DbChatRecord.session_id == session_id)
+        .order_by(DbChatRecord.record_id.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    inherited_session_title: str | None = None
+    if isinstance(prev_title_raw, str) and prev_title_raw.strip():
+        inherited_session_title = prev_title_raw.strip()
+
     recent = (
         db.execute(
             select(DbChatRecord)
@@ -480,6 +534,7 @@ def ask(
     record = DbChatRecord(
         user_id=user_id,
         session_id=session_id,
+        session_title=inherited_session_title,
         question_content=req.question,
         answer_content=full_answer,
         knowledge_source="langchain",
@@ -978,6 +1033,34 @@ def get_learning_path_detail(path_id: int, db: Session = Depends(get_db)):
         progresses=resp_progresses,
         tasks=resp_tasks,
     )
+
+
+@router.delete("/api/learning-path/{path_id}")
+def delete_learning_path(
+    path_id: int,
+    db: Session = Depends(get_db),
+    current_user: DbUser = Depends(get_current_user),
+):
+    """
+    删除一条学习路径及其子数据：题目 → 任务 → 阶段(learning_progress) → 路径。
+    仅删除 path_id 匹配的 learning_progress，不影响 path_id 为 NULL 的打卡等记录。
+    """
+    path = db.get(DbLearningPath, path_id)
+    if not path:
+        raise HTTPException(status_code=404, detail="路径不存在")
+    if path.user_id != current_user.user_id:
+        raise HTTPException(status_code=403, detail="禁止删除其他用户的路径")
+
+    task_ids = list(
+        db.execute(select(DbPathTask.task_id).where(DbPathTask.path_id == path_id)).scalars().all()
+    )
+    if task_ids:
+        db.execute(delete(DbTaskQuestion).where(DbTaskQuestion.task_id.in_(task_ids)))
+    db.execute(delete(DbPathTask).where(DbPathTask.path_id == path_id))
+    db.execute(delete(DbLearningProgress).where(DbLearningProgress.path_id == path_id))
+    db.execute(delete(DbLearningPath).where(DbLearningPath.path_id == path_id))
+    db.commit()
+    return {"message": "学习路径已删除", "path_id": path_id}
 
 
 # =========================
