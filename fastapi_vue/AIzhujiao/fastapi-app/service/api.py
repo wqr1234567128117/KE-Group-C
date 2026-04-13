@@ -439,6 +439,34 @@ def rename_conversation(
     return {"message": "已更新", "session_id": session_id, "session_title": new_title}
 
 
+@router.delete("/api/conversation/{session_id}")
+def delete_conversation(
+    session_id: str,
+    db: Session = Depends(get_db),
+    current_user: DbUser = Depends(get_current_user),
+):
+    """
+    删除某个会话（session_id）下当前用户的所有聊天记录。
+    """
+    n = db.execute(
+        select(func.count(DbChatRecord.record_id)).where(
+            DbChatRecord.session_id == session_id,
+            DbChatRecord.user_id == current_user.user_id,
+        )
+    ).scalar_one()
+    if int(n or 0) == 0:
+        raise HTTPException(status_code=404, detail="会话不存在或无权访问")
+
+    db.execute(
+        delete(DbChatRecord).where(
+            DbChatRecord.session_id == session_id,
+            DbChatRecord.user_id == current_user.user_id,
+        )
+    )
+    db.commit()
+    return {"message": "会话已删除", "session_id": session_id, "deleted": int(n)}
+
+
 @router.get("/api/conversation/{session_id}", response_model=List[ConversationMessageItem])
 def get_conversation_detail(session_id: str, db: Session = Depends(get_db)):
     rows = (
