@@ -12,6 +12,13 @@
           <span class="card-title">智能问答</span>
           <span class="card-desc">AI 辅助解答疑惑</span>
         </router-link>
+
+        <!-- 新增的作业辅导卡片 -->
+        <router-link to="/person-learning-path" class="nav-card">
+          <div class="card-icon">📝</div>
+          <span class="card-title">作业辅导</span>
+          <span class="card-desc">专项练习与作业批改</span>
+        </router-link>
         
         <router-link to="/learning-path" class="nav-card">
           <div class="card-icon">🗺️</div>
@@ -110,7 +117,8 @@ h1 {
 /* 网格布局 */
 .nav-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(2, 1fr); 
+  /* grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); */
   gap: 30px;
   margin-bottom: 50px;
 }

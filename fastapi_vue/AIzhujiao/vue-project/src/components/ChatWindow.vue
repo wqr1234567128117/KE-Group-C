@@ -21,8 +21,11 @@ const currentPage = ref('qa');
 
 const emit = defineEmits(['send-message']);
 
+// const toggleHomeworkMode = () => {
+//   isHomeworkMode.value = !isHomeworkMode.value;
+// };
 const toggleHomeworkMode = () => {
-  isHomeworkMode.value = !isHomeworkMode.value;
+  router.push('/person-learning-path');
 };
 
 const handleSend = () => {

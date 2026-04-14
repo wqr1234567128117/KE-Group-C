@@ -171,7 +171,53 @@ const handleRenameChat = async (chatId, newTitle) => {
 
 const handlePinChat = () => {};
 const handleShareChat = () => {};
-const handleDeleteChat = () => {};
+const handleDeleteChat = async (chatId) => {
+  try {
+    // 1. 调用后端API删除
+    // 注意：根据后端代码，接口返回格式为 { message, session_id, deleted }
+    const res = await api.deleteConversation(chatId); 
+    
+    console.log('删除响应:', res.data);
+
+    // 2. 更新前端状态
+    // 2.1 从侧边栏列表中移除
+    const index = conversations.value.findIndex(item => item.id === chatId);
+    if (index !== -1) {
+      conversations.value.splice(index, 1);
+    }
+
+    // 2.2 处理缓存 (如果该会话在内存中)
+    if (chatCache.value[chatId]) {
+      delete chatCache.value[chatId];
+    }
+
+    // 2.3 特殊逻辑：如果删除的是当前正在查看的会话
+    if (currentSessionId.value === chatId) {
+      // 方案：跳转到新对话 或 切换到列表中的第一个会话
+      if (conversations.value.length > 0) {
+        // 切换到第一个会话
+        currentSessionId.value = conversations.value[0].id;
+        // 尝试加载其详情（如果缓存中没有）
+        if (!chatCache.value[currentSessionId.value]?.length) {
+          await loadConversationDetail(currentSessionId.value);
+        }
+      } else {
+        // 列表为空，重置为新对话状态
+        currentSessionId.value = null;
+        chatCache.value[null] = [];
+      }
+    }
+
+    alert('会话已删除');
+    
+  } catch (error) {
+    // 处理错误 (例如网络问题或后端报错 404)
+    const errorMsg = error.response?.data?.detail || error.message;
+    console.error('删除失败:', errorMsg);
+    alert(`删除失败: ${errorMsg}`);
+  }
+};
+
 
 const currentChatContent = computed(() => chatCache.value[currentSessionId.value] || []);
 const isSidebarCollapsed = ref(false);

@@ -29,7 +29,6 @@ export default {
     return apiClient.post('/api/login', { username, password });
   },
   register(realName, major, username, password) {
-    // 注意：后端需要 real_name 和 major 字段
     return apiClient.post('/api/register', { 
       real_name: realName, 
       major, 
@@ -50,7 +49,7 @@ export default {
     });
   },
   
-  // 新增：重命名会话 API
+  // 重命名会话
   renameConversation(sessionId, newTitle) {
     return apiClient.patch(`/api/conversation/${sessionId}`, { 
       title: newTitle 
@@ -64,11 +63,15 @@ export default {
   getConversationDetail(sessionId) {
     return apiClient.get(`/api/conversation/${sessionId}`);
   },
+  // 删除会话 
+  deleteConversation(sessionId) {
+    return apiClient.delete(`/api/conversation/${sessionId}`); // 注意：是 /api/conversation (单数)
+  },
   // 获取热门问题
   getHotQuestions() {
     return apiClient.get('/api/hot-questions');
   },
-  // 获取问题建议 (写死的推荐)
+  // 获取问题建议 
   getSuggestions() {
     return apiClient.get('/api/question-suggestions');
   },
@@ -77,7 +80,7 @@ export default {
   getHomeworkHelp(content) {
     return apiClient.post('/api/homework-help', { content });
   },
-  // 新增：获取作业历史
+  // 获取作业历史
   getHomeworkHistory(userId) {
     return apiClient.get(`/api/homework-history/${userId}`);
   },
@@ -137,8 +140,8 @@ export default {
     return apiClient.get(`/api/progress/${userId}`);
   },
   // 获取打卡记录 (原接口为 /api/progress/check-in/${userId}，但后端代码中未定义此接口，此处保留原样，实际可能需要调整)
-  // 注意：后端代码中没有提供按用户获取打卡记录的独立接口，只有通用的 getProgress
-  // 如果后端未实现，前端调用 getProgress 即可
+  // 后端代码中没有提供按用户获取打卡记录的独立接口，只有通用的 getProgress
+  // 后端未实现，前端调用 getProgress
   getCheckInRecords(userId) {
     return apiClient.get(`/api/progress/${userId}`); // 复用进度接口，或者后端需补充接口
   },

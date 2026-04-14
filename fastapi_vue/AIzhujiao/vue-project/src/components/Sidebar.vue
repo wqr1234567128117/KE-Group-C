@@ -78,20 +78,20 @@
         <Icon icon="ph:pencil-bold" />
         <span>重命名</span>
       </div>
-      <div class="menu-item" @click="handlePin">
+      <!-- <div class="menu-item" @click="handlePin">
         <Icon icon="ph:push-pin-bold" />
         <span>置顶</span>
       </div>
       <div class="menu-item" @click="handleShare">
         <Icon icon="ph:share-fat" />
         <span>分享</span>
-      </div>
+      </div> -->
       <div class="menu-item danger" @click="handleDelete">
         <Icon icon="ph:trash-bold" />
         <span>删除</span>
       </div>
     </div>
-    <!-- ✅ 修改 5: 新增：内联重命名输入框 (直接放在 body 后面，利用 fixed 定位) -->
+    <!-- 新增：内联重命名输入框 (直接放在 body 后面，利用 fixed 定位) -->
     <div 
       v-if="isRenamingInline" 
       class="inline-rename-input" 
@@ -106,18 +106,15 @@
         @keyup.enter="confirmRenameInline"
         @blur="cancelRenameInline" 
       />
-      <!-- 可选：添加确定/取消按钮，或者只靠回车/失焦 -->
-      <!-- <ElButton size="small" @click="confirmRenameInline">确定</ElButton> -->
     </div>
   </div>
 </template>
 
 <script setup>
-import { defineProps, defineEmits, ref, nextTick, onMounted } from 'vue';
+import { defineProps, defineEmits, ref, nextTick, onMounted, onBeforeUnmount } from 'vue';
 import { Icon } from '@iconify/vue';
 import api from '../api/index'; // 引入统一封装的 API
-import { ElDialog, ElInput, ElButton } from 'element-plus'
-
+import { ElDialog, ElInput, ElButton } from 'element-plus'//重命名
 
 // ---------- Props & Emits ----------
 const props = defineProps({
@@ -137,10 +134,12 @@ const menuStyle = ref({ top: '0px', left: '0px' });
 const hotQuestions = ref([]);
 const recommendedQuestions = ref([]);
 
-// --- 新增：重命名相关的状态 ---
+// --- 重命名相关的状态 ---
 const isRenamingInline = ref(false); // 标记是否正在内联编辑
 const renameInputValue = ref('');
 const renamingTargetId = ref(null);
+
+const renameInputRef = ref(null); 
 
 // ---------- 生命周期 ----------
 onMounted(() => {
@@ -241,9 +240,6 @@ const handleRename = async () => {
 
 // --- 修改 3: 新增 confirmRenameInline ---
 const confirmRenameInline = () => {
-  // if (renamingTargetId.value) {
-  //   emit('rename-chat', renamingTargetId.value, renameInputValue.value);
-  // }
   if (renamingTargetId.value && renameInputValue.value.trim()) {
     emit('rename-chat', renamingTargetId.value, renameInputValue.value.trim());
   }
@@ -252,7 +248,7 @@ const confirmRenameInline = () => {
   renamingTargetId.value = null;
 };
 
-// --- 修改 4: 新增 cancelRenameInline ---
+// --- 新增 cancelRenameInline ---
 const cancelRenameInline = () => {
   isRenamingInline.value = false;
   renamingTargetId.value = null;
@@ -269,15 +265,38 @@ const handleShare = () => {
 };
 
 const handleDelete = () => {
-  emit('delete-chat', activeMenuId.value);
-  closeMenu();
-};
+  // 1. 获取当前选中的会话ID
+  const targetId = activeMenuId.value;
+  if (!targetId) return;
 
-const handleOutsideClick = () => {
-  if (activeMenuId.value !== null) {
+  // 2. 弹出确认框 
+  const isConfirmed = window.confirm('确定要删除此会话吗？此操作不可恢复。');
+  
+  if (isConfirmed) {
+    emit('delete-chat', targetId);
     closeMenu();
   }
 };
+
+const handleOutsideClick = (event) => {
+  // 1. 如果点击的是输入框内部组件，直接返回，不关闭
+  if (renameInputRef.value && event.target.closest('.inline-rename-input')) {
+    return;
+  }
+
+  if (activeMenuId.value !== null) {
+    closeMenu();
+  }
+
+  if (isRenamingInline.value) {
+    cancelRenameInline(); 
+  }
+};
+
+// --- 新增：组件卸载前移除事件监听 ---
+onBeforeUnmount(() => {
+  document.removeEventListener('click', handleOutsideClick);
+});
 </script>
 
 <style scoped>
