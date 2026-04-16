@@ -23,6 +23,7 @@ from repository.models import (
 )
 from service.langchain_chat_service import get_langchain_chat_service
 from service.learning_path_service import get_learning_path_service
+from service.question_service import get_question_service
 
 router = APIRouter()
 
@@ -773,21 +774,21 @@ class LearningPathDetailResponse(BaseModel):
     progresses: list[LearningProgressItem]
     tasks: list[PathTaskItem]
 
-
-@router.post("/api/learning-path/generate", response_model=LearningPathDetailResponse)
+@router.post("/api/learning-path/generate", response_model=dict)
 def generate_learning_path(
     req: LearningPathGenerateRequest,
     db: Session = Depends(get_db),
     current_user: DbUser = Depends(get_current_user),
 ):
-    # 测试阶段先固定用户；前端接好鉴权后再改回 Depends(get_current_user)
     user_id = req.user_id or current_user.user_id
     if user_id != current_user.user_id:
         raise HTTPException(status_code=403, detail="禁止访问其他用户数据")
 
     try:
         learning_path_service = get_learning_path_service()
+        question_service = get_question_service()
 
+        # 1. 先生成纯路径 JSON
         generated_result = learning_path_service.generate_learning_path(
             field=req.domain,
             goal=req.goal,
@@ -796,13 +797,24 @@ def generate_learning_path(
             user_id=user_id,
         )
 
-        flat_progresses = _flatten_generated_progresses(generated_result)
-        flat_tasks = _flatten_generated_tasks(generated_result)
+        # 2. API 层调用题目服务，把题目塞回路径 JSON
+        enriched_result = question_service.generate_questions_for_path(generated_result)
+
+        if not isinstance(enriched_result, dict):
+            raise ValueError("题目服务返回结果不是 JSON 对象。")
+
+        flat_progresses = _flatten_generated_progresses(enriched_result)
+        flat_tasks = _flatten_generated_tasks(enriched_result)
+
+        if not flat_progresses:
+            raise ValueError("未生成任何学习阶段。")
+        if not flat_tasks:
+            raise ValueError("未生成任何任务点。")
 
         now = datetime.datetime.now()
 
         first_stage_title = ""
-        stages = generated_result.get("stages", [])
+        stages = enriched_result.get("stages", [])
         if isinstance(stages, list) and stages:
             first_stage = stages[0] if isinstance(stages[0], dict) else {}
             first_stage_title = (
@@ -811,7 +823,7 @@ def generate_learning_path(
                 or ""
             )
 
-        # 1. 创建 learning_paths
+        # 3. 创建 learning_paths
         path = DbLearningPath(
             user_id=user_id,
             goal=req.goal,
@@ -826,9 +838,9 @@ def generate_learning_path(
         db.add(path)
         db.flush()
 
-        # 2. 创建 learning_progress
-        created_progresses: list[DbLearningProgress] = []
-        progress_order_to_id: dict[int, int] = {}
+        # 4. 创建 learning_progress
+        created_progresses: List[DbLearningProgress] = []
+        progress_order_to_id: Dict[int, int] = {}
 
         for item in flat_progresses:
             progress = DbLearningProgress(
@@ -847,8 +859,8 @@ def generate_learning_path(
         for progress in created_progresses:
             progress_order_to_id[progress.progress_order] = progress.progress_id
 
-        # 3. 创建 path_tasks，并写 progress_id
-        created_tasks: list[DbPathTask] = []
+        # 5. 创建 path_tasks
+        created_tasks: List[DbPathTask] = []
 
         for item in flat_tasks:
             progress_id = progress_order_to_id.get(item["progress_order"])
@@ -870,23 +882,11 @@ def generate_learning_path(
 
         db.flush()
 
-        # 4. 创建 task_questions
+        # 6. 创建 task_questions
+        #    注意：这里不再插空白题，只有实际返回了题目才入库
         for db_task, task_payload in zip(created_tasks, flat_tasks):
             questions = task_payload.get("questions", [])
-            if not isinstance(questions, list):
-                questions = []
-
-            if not questions:
-                q = DbTaskQuestion(
-                    task_id=db_task.task_id,
-                    question_text="",
-                    correct_answer="",
-                    is_passed=0,
-                    user_answer="",
-                    created_at=now,
-                    updated_at=now,
-                )
-                db.add(q)
+            if not isinstance(questions, list) or not questions:
                 continue
 
             for question in questions:
@@ -908,60 +908,17 @@ def generate_learning_path(
         db.commit()
         db.refresh(path)
 
-        # 5. 查回阶段和任务，按阶段树返回
-        progresses = (
-            db.execute(
-                select(DbLearningProgress)
-                .where(DbLearningProgress.path_id == path.path_id)
-                .order_by(DbLearningProgress.progress_order.asc(), DbLearningProgress.progress_id.asc())
-            )
-            .scalars()
-            .all()
+        # 7. 给前端直接返回完整 enriched JSON
+        enriched_result["path_id"] = path.path_id
+        enriched_result["status"] = path.status or first_stage_title
+        enriched_result["current_task_point"] = path.current_task_point
+        enriched_result["created_at"] = (
+            path.created_at.isoformat(sep=" ", timespec="seconds")
+            if path.created_at
+            else None
         )
 
-        tasks = (
-            db.execute(
-                select(DbPathTask)
-                .where(DbPathTask.path_id == path.path_id)
-                .order_by(DbPathTask.task_order.asc(), DbPathTask.task_id.asc())
-            )
-            .scalars()
-            .all()
-        )
-
-        resp_path = LearningPathResponse(
-            path_id=path.path_id,
-            user_id=path.user_id,
-            goal=path.goal or "",
-            domain=path.domain or "",
-            level=path.level or "",
-            background_plan=path.background_plan or "",
-            status=path.status or "",
-            created_at=path.created_at.isoformat(sep=" ", timespec="seconds") if path.created_at else None,
-        )
-
-        resp_tasks = [
-            PathTaskItem(
-                task_id=t.task_id,
-                task_name=t.task_name,
-                description=t.task_description or "",
-                order_no=t.task_order or 0,
-                is_completed=bool(t.is_completed),
-            )
-            for t in tasks
-        ]
-
-        resp_progresses = _build_progress_response_items(
-            progresses=progresses,
-            tasks=tasks,
-        )
-
-
-        return LearningPathDetailResponse(
-            path=resp_path,
-            progresses=resp_progresses,
-            tasks=resp_tasks,
-        )
+        return enriched_result
 
     except FileNotFoundError as e:
         db.rollback()
@@ -972,6 +929,113 @@ def generate_learning_path(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"学习路径生成异常: {str(e)}")
+
+
+def _flatten_generated_progresses(data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    stages = data.get("stages", [])
+    if not isinstance(stages, list):
+        return []
+
+    flat_progresses: List[Dict[str, Any]] = []
+    for idx, stage in enumerate(stages, start=1):
+        if not isinstance(stage, dict):
+            continue
+
+        flat_progresses.append(
+            {
+                "progress_order": _coerce_int(stage.get("stage_order"), idx),
+                "progress_name": stage.get("stage_title") or stage.get("title") or f"阶段{idx}",
+                "progress_description": (
+                    stage.get("stage_description")
+                    or stage.get("description")
+                    or stage.get("stage_objective")
+                    or ""
+                ),
+            }
+        )
+
+    return flat_progresses
+
+
+def _flatten_generated_tasks(data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    stages = data.get("stages", [])
+    if not isinstance(stages, list):
+        return []
+
+    flat_tasks: List[Dict[str, Any]] = []
+
+    for s_idx, stage in enumerate(stages, start=1):
+        if not isinstance(stage, dict):
+            continue
+
+        progress_order = _coerce_int(stage.get("stage_order"), s_idx)
+        tasks = stage.get("tasks", [])
+        if not isinstance(tasks, list):
+            continue
+
+        for t_idx, task in enumerate(tasks, start=1):
+            if not isinstance(task, dict):
+                continue
+
+            questions = task.get("questions", [])
+            if not isinstance(questions, list):
+                questions = []
+
+            flat_tasks.append(
+                {
+                    "progress_order": progress_order,
+                    "task_order": _coerce_int(task.get("task_order"), t_idx),
+                    "task_name": task.get("task_title") or task.get("title") or f"任务{t_idx}",
+                    "task_description": task.get("task_description") or task.get("description") or "",
+                    "questions": questions,
+                    "task_meta": task.get("task_meta", {}),
+                }
+            )
+
+    return flat_tasks
+
+
+def _normalize_question_row(question: dict, fallback_task_name: str) -> tuple[str, str]:
+    """
+    将题目对象转换为 DbTaskQuestion 可直接写入的字段：
+        (question_text, correct_answer)
+    """
+    if not isinstance(question, dict):
+        return (f"请完成“{fallback_task_name}”相关练习。", "(待判定)")
+
+    question_text = (
+        question.get("question_text")
+        or question.get("question_content")
+        or question.get("content")
+        or question.get("title")
+        or f"请完成“{fallback_task_name}”相关练习。"
+    )
+
+    options = question.get("options", [])
+    if isinstance(options, list) and options:
+        option_lines = []
+        for option in options:
+            if option is None:
+                continue
+            option_lines.append(str(option).strip())
+        if option_lines:
+            question_text = f"{question_text}\n" + "\n".join(option_lines)
+
+    correct_answer = (
+        question.get("correct_answer")
+        or question.get("answer")
+        or question.get("standard_answer")
+        or "(待判定)"
+    )
+
+    return str(question_text).strip(), str(correct_answer).strip()
+
+
+def _coerce_int(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 @router.get("/api/learning-path/{user_id}", response_model=List[LearningPathResponse])
