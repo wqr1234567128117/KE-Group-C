@@ -192,7 +192,7 @@
             <div class="table-cell">{{ record.path_id }}</div>
             <div class="table-cell truncate" :title="record.goal">{{ record.goal }}</div>
             <div class="table-cell">
-              <span class="domain-tag">{{ getDomainLabel(record.domain) }}</span>
+              <span class="domain-tag">{{ getDomainLabel(record.domain || record.field) }}</span>
             </div>
             <div class="table-cell">{{ formatDate(record.created_at) }}</div>
             <div class="table-cell action-group">
@@ -249,6 +249,20 @@ const extractTasks = (payload) => {
   if (Array.isArray(payload)) return payload
   if (Array.isArray(payload?.tasks)) return payload.tasks
   if (Array.isArray(payload?.path_tasks)) return payload.path_tasks
+
+  // 兼容当前后端新结构：stages -> tasks
+  if (Array.isArray(payload?.stages)) {
+    return payload.stages.flatMap((stage) => {
+      const tasks = Array.isArray(stage?.tasks) ? stage.tasks : []
+      return tasks.map((task) => ({
+        ...task,
+        progress_order: stage?.stage_order,
+        progress_name: stage?.stage_title,
+        progress_description: stage?.stage_description,
+      }))
+    })
+  }
+
   return []
 }
 
@@ -259,7 +273,7 @@ const normalizeTask = (task, idx) => {
     ...task,
     order_no: Number.isNaN(orderNo) ? idx + 1 : orderNo,
     task_order: Number.isNaN(orderNo) ? idx + 1 : orderNo,
-    task_name: task?.task_name ?? task?.name ?? `任务点 ${idx + 1}`,
+    task_name: task?.task_name ?? task?.task_title ?? task?.name ?? `任务点 ${idx + 1}`,
     description: task?.description ?? task?.task_description ?? '',
     task_description: task?.task_description ?? task?.description ?? '',
     is_completed: Boolean(task?.is_completed),
@@ -270,11 +284,17 @@ const normalizeProgress = (progress, idx) => {
   const progressOrder = Number(progress?.progress_order ?? progress?.stage_order ?? idx + 1)
   const rawTasks = Array.isArray(progress?.tasks) ? progress.tasks : []
 
+  const progressName =
+    progress?.progress_name ??
+    progress?.stage_title ??
+    progress?.stage_name ??
+    `阶段 ${idx + 1}`
+
   return {
     ...progress,
-    progress_key: `${progress?.progress_id ?? progressOrder}-${progress?.progress_name ?? progress?.stage_name ?? `阶段 ${idx + 1}`}`,
+    progress_key: `${progress?.progress_id ?? progressOrder}-${progressName}`,
     progress_order: Number.isNaN(progressOrder) ? idx + 1 : progressOrder,
-    progress_name: progress?.progress_name ?? progress?.stage_name ?? `阶段 ${idx + 1}`,
+    progress_name: progressName,
     progress_description: progress?.progress_description ?? progress?.stage_description ?? '',
     tasks: rawTasks
       .map((task, taskIdx) => normalizeTask(task, taskIdx))
@@ -294,6 +314,7 @@ const buildProgressesFromTasks = (tasks) => {
       const safeOrder = Number.isNaN(progressOrder) ? 1 : progressOrder
       const progressName =
         task?.progress_name ??
+        task?.stage_title ??
         task?.stage_name ??
         task?.phase_name ??
         task?.section_name ??
@@ -356,16 +377,32 @@ const applyPathResponse = (response) => {
   currentPathMeta.value = {
     path_id: pathMeta?.path_id,
     goal: pathMeta?.goal ?? payload?.goal ?? form.goal,
-    domain: pathMeta?.domain ?? payload?.domain ?? form.domain,
+    domain: pathMeta?.domain ?? payload?.domain ?? payload?.field ?? form.domain,
     level: pathMeta?.level ?? payload?.level ?? form.level,
     status: pathMeta?.status ?? payload?.status ?? '',
     background_plan: pathMeta?.background_plan ?? payload?.background_plan ?? form.background_plan,
     created_at: pathMeta?.created_at ?? payload?.created_at ?? '',
   }
 
-  const progresses = Array.isArray(payload?.progresses)
+  // 旧结构：progresses
+  let progresses = Array.isArray(payload?.progresses)
     ? payload.progresses.map((progress, idx) => normalizeProgress(progress, idx))
     : []
+
+  // 新结构：stages
+  if (!progresses.length && Array.isArray(payload?.stages)) {
+    progresses = payload.stages.map((stage, idx) =>
+      normalizeProgress(
+        {
+          progress_order: stage?.stage_order,
+          progress_name: stage?.stage_title,
+          progress_description: stage?.stage_description,
+          tasks: Array.isArray(stage?.tasks) ? stage.tasks : [],
+        },
+        idx,
+      ),
+    )
+  }
 
   currentProgresses.value = progresses
 
@@ -401,7 +438,17 @@ const generate = async () => {
       background_plan: form.background_plan,
     })
 
-    applyPathResponse(response)
+    const payload = extractPayload(response)
+    const generatedPathId = payload?.path_id || payload?.path?.path_id
+
+    // 生成成功后，直接按“查看历史详情”的逻辑重新拉详情
+    if (generatedPathId) {
+      const detailResponse = await api.getPathDetail(generatedPathId)
+      applyPathResponse(detailResponse)
+    } else {
+      // 如果后端这次没回 path_id，再退回直接解析生成接口结果
+      applyPathResponse(response)
+    }
 
     if (!displayedProgresses.value.length) {
       alert('已生成，但暂未拿到阶段与任务点数据，请检查后端返回结构')
@@ -413,6 +460,7 @@ const generate = async () => {
     alert('生成失败：' + (error.response?.data?.detail || error.message || '网络错误'))
     currentPath.value = []
     currentProgresses.value = []
+    currentPathMeta.value = {}
   } finally {
     loading.value = false
   }
@@ -466,7 +514,7 @@ const getPaths = async () => {
 
 const getDomainLabel = (key) => {
   const item = domains.find((d) => d.key === key)
-  return item ? item.label : '未知领域'
+  return item ? item.label : (key || '未知领域')
 }
 
 const formatDate = (isoString) => {
@@ -489,7 +537,7 @@ const viewPath = async (record) => {
     currentPathMeta.value = {
       ...currentPathMeta.value,
       goal: currentPathMeta.value.goal || record.goal,
-      domain: currentPathMeta.value.domain || record.domain,
+      domain: currentPathMeta.value.domain || record.domain || record.field,
     }
   } catch (error) {
     console.error('获取路径详情失败:', error)
@@ -510,13 +558,13 @@ const deletePath = async (pathId) => {
   try {
     // 2. 调用删除接口
     await api.deletePath(pathId);
-    
+
     // 3. 更新前端列表
     learningHistory.value = learningHistory.value.filter((item) => item.path_id !== pathId);
-    
+
     // 4. 提示成功
     alert('删除成功');
-    
+
   } catch (error) {
     // 5. 错误处理
     console.error('删除失败:', error);
