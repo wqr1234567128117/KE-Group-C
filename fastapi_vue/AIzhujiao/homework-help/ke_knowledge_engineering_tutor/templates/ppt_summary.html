@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PPT 知识点总结</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="page">
+    <header class="hero">
+      <div>
+        <div class="nav-row">
+          <a class="nav-pill" href="/">批量查题</a>
+          <a class="nav-pill active" href="/ppt-summary">PPT 知识点总结</a>
+        </div>
+        <h1>PPT 知识点总结</h1>
+        <p>{{ course_name }}｜上传课程 PPT，自动总结章节结构、核心知识点和复习问题。</p>
+      </div>
+      <div class="hero-actions">
+        <button id="pptCopyBtn" class="secondary" disabled>复制总结</button>
+      </div>
+    </header>
+
+    <main class="grid two-cols">
+      <section class="panel input-panel">
+        <h2>上传 PPT</h2>
+        <form id="pptForm">
+          <label class="label">PPT 文件</label>
+          <div id="pptDropzone" class="dropzone ppt-dropzone">
+            <input id="ppt_file" name="ppt_file" type="file" accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation" hidden />
+            <div class="dropzone-content">
+              <div class="dropzone-title">拖动 .pptx 到这里，或点击选择文件</div>
+              <div class="dropzone-subtitle">系统会先抽取每页文本，再总结课程知识点。</div>
+            </div>
+          </div>
+          <div id="pptFileInfo" class="file-list"></div>
+
+          <label class="label" for="ppt_extra_requirement">额外要求</label>
+          <textarea id="ppt_extra_requirement" name="extra_requirement" rows="4" placeholder="例如：偏向考试复习提纲；突出每页核心概念；最后给我5个适合课堂提问的问题。"></textarea>
+
+          <div class="actions">
+            <button id="pptSubmitBtn" type="submit" class="primary">开始总结</button>
+            <button id="pptClearBtn" type="button" class="ghost">清空内容</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel result-panel">
+        <h2>总结结果</h2>
+        <div id="pptStatus" class="status">等待上传 PPT。</div>
+        <div id="pptEmptyState" class="empty-state">
+          <div class="empty-title">还没有总结结果</div>
+          <div class="empty-desc">上传 PPT 后，这里会显示整体总结、核心知识点和逐页摘要。</div>
+        </div>
+
+        <div id="pptResult" class="result hidden">
+          <div class="result-block"><h3>课程主题</h3><div id="course_theme" class="content"></div></div>
+          <div class="result-block"><h3>整体总结</h3><div id="overall_summary" class="content"></div></div>
+          <div class="result-block"><h3>章节结构</h3><ul id="chapter_outline"></ul></div>
+          <div class="result-block"><h3>核心知识点</h3><ul id="core_knowledge_points"></ul></div>
+          <div class="result-block"><h3>易混概念</h3><ul id="easy_confusions"></ul></div>
+          <div class="result-block"><h3>建议复习问题</h3><ol id="review_questions"></ol></div>
+          <div class="result-block"><h3>逐页摘要</h3><div id="slide_summaries" class="slide-summary-list"></div></div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="/static/ppt.js"></script>
+</body>
+</html>

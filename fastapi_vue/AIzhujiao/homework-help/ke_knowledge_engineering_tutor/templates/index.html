@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>知识工程课程智能助教</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="page">
+    <header class="hero">
+      <div>
+        <div class="nav-row">
+          <a class="nav-pill active" href="/">批量查题</a>
+          <a class="nav-pill" href="/ppt-summary">PPT 知识点总结</a>
+        </div>
+        <h1>知识工程课程多模态智能助教</h1>
+        <p>{{ course_name }}｜支持批量文本题、批量图片题，以及单图多题自动拆分。</p>
+      </div>
+      <div class="hero-actions">
+        <button id="copyBtn" class="secondary" disabled>复制当前解析</button>
+      </div>
+    </header>
+
+    <main class="grid two-cols">
+      <section class="panel input-panel">
+        <h2>批量题目输入</h2>
+        <form id="solveForm">
+          <label class="label">课程场景预设</label>
+          <div class="preset-list" id="presetList">
+            {% for key, value in presets.items() %}
+            <button type="button" class="preset-chip {% if loop.first %}active{% endif %}" data-key="{{ key }}" data-prompt="{{ value.prompt }}">{{ value.label }}</button>
+            {% endfor %}
+          </div>
+          <input type="hidden" id="preset_key" name="preset_key" value="general_ke" />
+          <div class="preset-help" id="presetHelp">{{ presets['general_ke']['prompt'] }}</div>
+
+          <label class="label">多个文本题目</label>
+          <div id="questionList" class="question-list"></div>
+          <div class="inline-actions compact">
+            <button type="button" id="addQuestionBtn" class="ghost">+ 添加一个题目输入框</button>
+          </div>
+
+          <label class="label" for="extra_requirement">额外要求</label>
+          <textarea id="extra_requirement" name="extra_requirement" rows="4" placeholder="例如：更偏考试答题风格；突出知识表示和推理的区别；用研究生课程汇报口吻总结。"></textarea>
+
+          <label class="label">拖拽上传题图</label>
+          <div id="dropzone" class="dropzone">
+            <input id="images" name="images" type="file" accept="image/*" multiple hidden />
+            <div class="dropzone-content">
+              <div class="dropzone-title">拖动图片到这里，或点击选择文件</div>
+              <div class="dropzone-subtitle">支持多张图片；一张图片中有多个题目时，系统会先自动拆题，再分别生成解析。</div>
+            </div>
+          </div>
+          <div id="fileList" class="file-list"></div>
+
+          <div class="actions">
+            <button id="submitBtn" type="submit" class="primary">开始批量解答</button>
+            <button id="clearBtn" type="button" class="ghost">清空内容</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel result-panel">
+        <h2>解析结果</h2>
+        <div id="status" class="status">等待输入。</div>
+
+        <div id="emptyState" class="empty-state">
+          <div class="empty-title">还没有解析结果</div>
+          <div class="empty-desc">提交后，这里会显示题目列表。你可以点击左侧题目编号，查看对应的详细解析。</div>
+        </div>
+
+        <div id="resultArea" class="result-area hidden">
+          <aside class="question-sidebar">
+            <div class="sidebar-title">题目列表</div>
+            <div id="questionTabs" class="question-tabs"></div>
+          </aside>
+          <section class="question-detail">
+            <div class="result-block"><h3>识别题目</h3><div id="recognized_question" class="content"></div></div>
+            <div class="result-grid">
+              <div class="result-block"><h3>来源</h3><div id="source_info" class="content"></div></div>
+              <div class="result-block"><h3>置信度</h3><div id="confidence" class="content"></div></div>
+            </div>
+            <div class="result-block"><h3>直接答案</h3><div id="direct_answer" class="content"></div></div>
+            <div class="result-block"><h3>详细解析</h3><div id="detailed_explanation" class="content"></div></div>
+            <div class="result-block"><h3>课程关联</h3><div id="relation_to_course" class="content"></div></div>
+            <div class="result-block"><h3>主题标签</h3><ul id="topic_tags"></ul></div>
+            <div class="result-block"><h3>解题提纲</h3><ol id="solving_outline"></ol></div>
+            <div class="result-block"><h3>关键知识点</h3><ul id="key_points"></ul></div>
+            <div class="result-block"><h3>常见混淆点</h3><ul id="common_confusions"></ul></div>
+            <div class="result-block"><h3>延伸追问</h3><ul id="extension_questions"></ul></div>
+          </section>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
