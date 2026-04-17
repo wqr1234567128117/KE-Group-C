@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime
 import hashlib
 import uuid
+from collections import defaultdict
 from typing import Optional, List, Dict, Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -74,8 +75,11 @@ def _normalize_question_row(question: dict, fallback_task_name: str) -> tuple[st
 
     return str(question_text), str(correct_answer)
 
-def _build_progress_response_items(progresses, tasks) -> list[LearningProgressItem]:
+def _build_progress_response_items(progresses, tasks, question_map=None) -> list[LearningProgressItem]:
     task_map: dict[int, list] = {}
+
+    if question_map is None:
+        question_map = defaultdict(list)
 
     for task in tasks:
         if task.progress_id is None:
@@ -99,8 +103,9 @@ def _build_progress_response_items(progresses, tasks) -> list[LearningProgressIt
                         task_id=t.task_id,
                         task_name=t.task_name,
                         description=t.task_description or "",
-                        order_no=idx,
+                        order_no=t.task_order or idx,
                         is_completed=bool(t.is_completed),
+                        questions=question_map.get(t.task_id, []),
                     )
                     for idx, t in enumerate(current_tasks, start=1)
                 ],
@@ -761,12 +766,20 @@ class LearningPathResponse(BaseModel):
     created_at: Optional[str] = None
 
 
+class PathQuestionItem(BaseModel):
+    question_id: int
+    question_text: str
+    correct_answer: str
+    user_answer: str
+    is_passed: int
+
 class PathTaskItem(BaseModel):
     task_id: int
     task_name: str
     description: str = ""
     order_no: int = 0
     is_completed: bool = False
+    questions: list[PathQuestionItem]
 
 
 class LearningPathDetailResponse(BaseModel):
@@ -1087,11 +1100,40 @@ def get_learning_path_detail(path_id: int, db: Session = Depends(get_db)):
         db.execute(
             select(DbPathTask)
             .where(DbPathTask.path_id == path_id)
-            .order_by(DbPathTask.task_order.asc(), DbPathTask.task_id.asc())
+            .order_by(
+                DbPathTask.progress_id.asc(),
+                DbPathTask.task_order.asc(),
+                DbPathTask.task_id.asc(),
+            )
         )
         .scalars()
         .all()
     )
+
+    task_ids = [t.task_id for t in tasks]
+
+    question_map = defaultdict(list)
+    if task_ids:
+        questions = (
+            db.execute(
+                select(DbTaskQuestion)
+                .where(DbTaskQuestion.task_id.in_(task_ids))
+                .order_by(DbTaskQuestion.task_id.asc(), DbTaskQuestion.question_id.asc())
+            )
+            .scalars()
+            .all()
+        )
+
+        for q in questions:
+            question_map[q.task_id].append(
+                PathQuestionItem(
+                    question_id=q.question_id,
+                    question_text=q.question_text or "",
+                    correct_answer=q.correct_answer or "",
+                    user_answer=q.user_answer or "",
+                    is_passed=q.is_passed or 0,
+                )
+            )
 
     resp_path = LearningPathResponse(
         path_id=path.path_id,
@@ -1111,6 +1153,7 @@ def get_learning_path_detail(path_id: int, db: Session = Depends(get_db)):
             description=t.task_description or "",
             order_no=t.task_order or 0,
             is_completed=bool(t.is_completed),
+            questions=question_map.get(t.task_id, []),
         )
         for t in tasks
     ]
@@ -1118,6 +1161,7 @@ def get_learning_path_detail(path_id: int, db: Session = Depends(get_db)):
     resp_progresses = _build_progress_response_items(
         progresses=progresses,
         tasks=tasks,
+        question_map=question_map,
     )
 
     return LearningPathDetailResponse(

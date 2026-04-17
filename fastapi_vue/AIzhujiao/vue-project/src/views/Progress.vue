@@ -129,19 +129,25 @@
 
                   <template v-if="Array.isArray(task.questions) && task.questions.length">
                     <div
-                      v-for="question in task.questions"
-                      :key="question.question_id || question.id"
+                      v-for="(question, qIndex) in task.questions"
+                      :key="question.question_id || `question-${task.task_id || task.order_no}-${qIndex}`"
                       class="question-item"
                     >
                       <span class="question-dot"></span>
-                      <span class="question-text">
-                        {{ question.title || question.question_text || '未命名题目' }}
-                      </span>
+                      <div class="question-main">
+                        <div class="question-text">
+                          {{ qIndex + 1 }}. {{ question.question_text || question.title || '未命名题目' }}
+                        </div>
+                        <div class="question-meta" v-if="question.correct_answer || question.user_answer">
+                          <span v-if="question.correct_answer">参考答案：{{ question.correct_answer }}</span>
+                          <span v-if="question.user_answer">我的作答：{{ question.user_answer }}</span>
+                        </div>
+                      </div>
                     </div>
                   </template>
 
                   <div v-else class="question-empty">
-                    当前任务点题目暂未接入，后续会展示在这里。
+                    当前任务点暂无题目。
                   </div>
                 </div>
               </div>
@@ -226,32 +232,98 @@ const sortByNumber = (list, field) => {
   return [...(list || [])].sort((a, b) => Number(a?.[field] || 0) - Number(b?.[field] || 0))
 }
 
+const normalizeQuestions = (questions) => {
+  if (!Array.isArray(questions)) return []
+
+  return questions.map((question, index) => ({
+    ...question,
+    question_id: question?.question_id ?? question?.id ?? `q-${index}`,
+    question_text:
+      question?.question_text ||
+      question?.title ||
+      question?.content ||
+      '未命名题目',
+    correct_answer: question?.correct_answer || '',
+    user_answer: question?.user_answer || '',
+    is_passed: Number(question?.is_passed || 0),
+  }))
+}
+
+const buildTaskIndex = (tasks) => {
+  const byId = new Map()
+  const byName = new Map()
+
+  ;(tasks || []).forEach((task, index) => {
+    const normalizedTask = {
+      ...task,
+      order_no: Number(task?.order_no || task?.task_order || index + 1),
+      description: task?.description || task?.task_description || '',
+      questions: normalizeQuestions(task?.questions),
+    }
+
+    if (task?.task_id != null) {
+      byId.set(String(task.task_id), normalizedTask)
+    }
+
+    const taskName = task?.task_name || task?.title || ''
+    if (taskName) {
+      byName.set(taskName, normalizedTask)
+    }
+  })
+
+  return { byId, byName }
+}
+
+const mergeTaskWithFlatData = (task, taskIndex, fallbackOrder = 1) => {
+  const taskIdKey = task?.task_id != null ? String(task.task_id) : null
+  const taskName = task?.task_name || task?.title || ''
+  const flatTask =
+    (taskIdKey ? taskIndex.byId.get(taskIdKey) : null) ||
+    (taskName ? taskIndex.byName.get(taskName) : null) ||
+    null
+
+  const merged = {
+    ...task,
+    ...(flatTask || {}),
+  }
+
+  merged.order_no = Number(merged?.order_no || merged?.task_order || fallbackOrder)
+  merged.description = merged?.description || merged?.task_description || ''
+  merged.questions = normalizeQuestions(merged?.questions)
+
+  return merged
+}
+
 const normalizeStagesFromDetail = (detail) => {
   const progresses = Array.isArray(detail?.progresses) ? detail.progresses : []
   const flatTasks = Array.isArray(detail?.tasks) ? detail.tasks : []
+  const taskIndex = buildTaskIndex(flatTasks)
 
   if (progresses.length) {
-    const hasNestedTasks = progresses.some((progress) => Array.isArray(progress?.tasks) && progress.tasks.length)
+    return sortByNumber(progresses, 'progress_order').map((progress) => {
+      const nestedTasks = Array.isArray(progress?.tasks) ? progress.tasks : []
 
-    if (hasNestedTasks) {
-      return sortByNumber(progresses, 'progress_order').map((progress) => ({
+      if (nestedTasks.length) {
+        return {
+          ...progress,
+          tasks: sortByNumber(nestedTasks, 'order_no').map((task, index) =>
+            mergeTaskWithFlatData(task, taskIndex, index + 1),
+          ),
+        }
+      }
+
+      const progressTasks = flatTasks.filter((task) => {
+        if (task?.progress_id == null) return false
+        return String(task.progress_id) === String(progress.progress_id)
+      })
+
+      return {
         ...progress,
-        tasks: sortByNumber(progress.tasks || [], 'order_no'),
-      }))
-    }
-
-    const groupedTasks = {}
-    flatTasks.forEach((task) => {
-      const progressId = task?.progress_id
-      if (progressId == null) return
-      if (!groupedTasks[progressId]) groupedTasks[progressId] = []
-      groupedTasks[progressId].push(task)
+        tasks: sortByNumber(progressTasks, 'order_no').map((task, index) =>
+          mergeTaskWithFlatData(task, taskIndex, index + 1),
+        ),
+      }
     })
-
-    return sortByNumber(progresses, 'progress_order').map((progress) => ({
-      ...progress,
-      tasks: sortByNumber(groupedTasks[progress.progress_id] || [], 'order_no'),
-    }))
   }
 
   if (flatTasks.length) {
@@ -261,7 +333,9 @@ const normalizeStagesFromDetail = (detail) => {
         progress_order: 1,
         progress_name: detail?.path?.status || '学习阶段',
         progress_description: detail?.path?.goal || '当前学习路径的任务点列表',
-        tasks: sortByNumber(flatTasks, 'order_no'),
+        tasks: sortByNumber(flatTasks, 'order_no').map((task, index) =>
+          mergeTaskWithFlatData(task, taskIndex, index + 1),
+        ),
       },
     ]
   }
@@ -787,4 +861,20 @@ const formatPathOption = (path) => {
     max-height: none;
   }
 }
+
+.question-main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.question-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 12px;
+  color: #8a83a3;
+}
+
 </style>
