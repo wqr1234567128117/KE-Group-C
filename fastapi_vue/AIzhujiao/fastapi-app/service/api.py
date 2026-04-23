@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import datetime
 import hashlib
+import re
 import uuid
 from collections import defaultdict
 from typing import Optional, List, Dict, Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 from sqlalchemy import select, func, delete, update
@@ -1233,12 +1234,73 @@ class SubmitAnswerRequest(BaseModel):
     user_answer: str
 
 
+def _parse_submit_answer_payload(body: Any) -> SubmitAnswerRequest:
+    payload = body
+    if isinstance(payload, dict) and isinstance(payload.get("question_id"), dict):
+        payload = payload.get("question_id")
+
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=422, detail="请求体格式错误")
+
+    question_id = payload.get("question_id")
+    user_answer = payload.get("user_answer")
+    user_id = payload.get("user_id")
+
+    try:
+        question_id = int(question_id)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="question_id 必须是整数")
+
+    user_answer = str(user_answer or "").strip()
+    if not user_answer:
+        raise HTTPException(status_code=422, detail="user_answer 不能为空")
+
+    try:
+        user_id = int(user_id) if user_id is not None else None
+    except (TypeError, ValueError):
+        user_id = None
+
+    return SubmitAnswerRequest(
+        user_id=user_id,
+        question_id=question_id,
+        user_answer=user_answer,
+    )
+
+
+def _normalize_answer_text(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _extract_option_label(value: Any) -> str:
+    text = _normalize_answer_text(value)
+    if not text:
+        return ""
+
+    matched = re.match(r"(?:选项)?\s*([A-Z])(?:\s*[\.、:：]|$)", text, flags=re.IGNORECASE)
+    return matched.group(1).upper() if matched else ""
+
+
+def _compare_answer(user_answer: Any, correct_answer: Any) -> bool:
+    user_text = _normalize_answer_text(user_answer)
+    correct_text = _normalize_answer_text(correct_answer)
+    if not user_text or not correct_text:
+        return False
+
+    user_label = _extract_option_label(user_text)
+    correct_label = _extract_option_label(correct_text)
+    if user_label and correct_label:
+        return user_label == correct_label
+
+    return user_text == correct_text
+
+
 @router.post("/api/tasks/answer")
 def submit_answer(
-    req: SubmitAnswerRequest,
+    body: dict = Body(...),
     db: Session = Depends(get_db),
     current_user: DbUser = Depends(get_current_user),
 ):
+    req = _parse_submit_answer_payload(body)
     user_id = req.user_id or current_user.user_id
     if user_id != current_user.user_id:
         raise HTTPException(status_code=403, detail="禁止访问其他用户数据")
@@ -1247,28 +1309,101 @@ def submit_answer(
     if not q:
         raise HTTPException(status_code=404, detail="题目不存在")
 
-    q.user_answer = req.user_answer
-    # 开放题：correct_answer 为 "(开放题)" 时默认通过；否则严格比对
-    correct = (q.correct_answer or "").strip()
+    task = db.get(DbPathTask, q.task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="题目所属任务不存在")
+
+    path = db.get(DbLearningPath, task.path_id) if task.path_id else None
+    if path and path.user_id != user_id:
+        raise HTTPException(status_code=403, detail="禁止操作其他用户的题目")
+
+    final_answer = _normalize_answer_text(req.user_answer)
+    if not final_answer:
+        raise HTTPException(status_code=400, detail="答案不能为空")
+
+    correct = _normalize_answer_text(q.correct_answer)
     if correct == "(开放题)":
         is_correct = True
+    elif correct == "(待判定)" or not correct:
+        is_correct = False
     else:
-        is_correct = req.user_answer.strip() == correct
+        is_correct = _compare_answer(final_answer, correct)
+
+    now = datetime.datetime.now()
+    q.user_answer = final_answer
     q.is_passed = 1 if is_correct else 0
-    q.updated_at = datetime.datetime.now()
+    q.updated_at = now
+
+    task_questions = (
+        db.execute(
+            select(DbTaskQuestion)
+            .where(DbTaskQuestion.task_id == task.task_id)
+            .order_by(DbTaskQuestion.question_id.asc())
+        )
+        .scalars()
+        .all()
+    )
+
+    total_questions = len(task_questions)
+    answered_questions = sum(1 for item in task_questions if _normalize_answer_text(item.user_answer))
+    passed_questions = sum(1 for item in task_questions if int(item.is_passed or 0) == 1)
+
+    task_completed = bool(total_questions > 0 and answered_questions == total_questions)
+    task.is_completed = 1 if task_completed else 0
+    task.updated_at = now
+
+    completed_tasks = 0
+    total_tasks = 0
+    completion_rate = 0
+    path_status = path.status if path else ""
+    current_task_point = getattr(path, "current_task_point", None) if path else None
+
+    if path:
+        all_tasks = (
+            db.execute(
+                select(DbPathTask)
+                .where(DbPathTask.path_id == path.path_id)
+                .order_by(DbPathTask.task_order.asc(), DbPathTask.task_id.asc())
+            )
+            .scalars()
+            .all()
+        )
+        total_tasks = len(all_tasks)
+        completed_tasks = sum(1 for item in all_tasks if int(item.is_completed or 0) == 1)
+        completion_rate = int(round(completed_tasks * 100 / total_tasks)) if total_tasks else 0
+
+        first_unfinished_task = next((item for item in all_tasks if not int(item.is_completed or 0)), None)
+        if first_unfinished_task is None:
+            path_status = "已完成"
+            current_task_point = None
+        else:
+            current_task_point = first_unfinished_task.task_name
+            progress = db.get(DbLearningProgress, first_unfinished_task.progress_id) if first_unfinished_task.progress_id else None
+            path_status = progress.progress_name if progress and progress.progress_name else (path.status or "学习中")
+
+        path.status = path_status
+        path.current_task_point = current_task_point
+        path.updated_at = now
+
     db.commit()
 
-    # 如果该 task 下全部通过，则标记 task 完成
-    task_id = q.task_id
-    total = db.execute(select(func.count(DbTaskQuestion.question_id)).where(DbTaskQuestion.task_id == task_id)).scalar_one()
-    passed = db.execute(
-        select(func.count(DbTaskQuestion.question_id)).where(DbTaskQuestion.task_id == task_id, DbTaskQuestion.is_passed == 1)
-    ).scalar_one()
-    if int(total) > 0 and int(total) == int(passed):
-        db.execute(update(DbPathTask).where(DbPathTask.task_id == task_id).values(is_completed=1, updated_at=datetime.datetime.now()))
-        db.commit()
-
-    return {"message": "提交成功", "is_correct": bool(is_correct)}
+    return {
+        "message": "提交成功",
+        "question_id": q.question_id,
+        "task_id": task.task_id,
+        "user_answer": final_answer,
+        "is_correct": bool(is_correct),
+        "is_passed": int(q.is_passed or 0),
+        "task_is_completed": bool(task_completed),
+        "answered_questions": int(answered_questions),
+        "total_questions": int(total_questions),
+        "passed_questions": int(passed_questions),
+        "completed_tasks": int(completed_tasks),
+        "total_tasks": int(total_tasks),
+        "completion_rate": int(completion_rate),
+        "path_status": path_status,
+        "current_task_point": current_task_point,
+    }
 
 
 class CheckInRequest(BaseModel):

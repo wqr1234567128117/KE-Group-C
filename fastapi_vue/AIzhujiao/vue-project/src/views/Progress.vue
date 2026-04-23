@@ -34,7 +34,7 @@
           <div class="meta-tags">
             <span class="meta-tag">领域：{{ formatDomain(selectedPath.domain) }}</span>
             <span class="meta-tag">水平：{{ selectedPath.level || '未设置' }}</span>
-            <span class="meta-tag">当前阶段：{{ selectedPath.status || currentStageName }}</span>
+            <span class="meta-tag">当前阶段：{{ currentStageName || selectedPath.status || '暂无' }}</span>
           </div>
           <p class="background-text">
             {{ selectedPath.background_plan || '暂无学习背景与计划说明。' }}
@@ -59,7 +59,6 @@
             <div class="mini-progress-bar" :style="{ width: `${completionRate}%` }"></div>
           </div>
         </div>
-
       </section>
 
       <section class="content-card">
@@ -70,6 +69,7 @@
           <div class="content-stats" v-if="selectedPath">
             <span>{{ totalStages }} 个阶段</span>
             <span>{{ totalTasks }} 个任务点</span>
+            <span>{{ totalQuestions }} 道题目</span>
           </div>
         </div>
 
@@ -91,8 +91,13 @@
                   {{ stage.progress_description || '暂无阶段说明。' }}
                 </p>
               </div>
-              <div class="stage-summary">
-                <span>{{ getCompletedTaskCount(stage.tasks) }}/{{ stage.tasks.length }} 已完成</span>
+              <div class="stage-summary-wrap">
+                <div class="stage-summary">
+                  <span>{{ getCompletedTaskCount(stage.tasks) }}/{{ stage.tasks.length }} 已完成</span>
+                </div>
+                <div class="stage-summary light">
+                  <span>{{ getStageAnsweredCount(stage.tasks) }}/{{ getStageQuestionCount(stage.tasks) }} 已作答</span>
+                </div>
               </div>
             </div>
 
@@ -101,17 +106,22 @@
                 v-for="task in stage.tasks"
                 :key="task.task_id || `${stage.progress_id}-${task.order_no}`"
                 class="task-card"
-                :class="task.is_completed ? 'task-card--done' : 'task-card--todo'"
+                :class="isTaskCompleted(task) ? 'task-card--done' : 'task-card--todo'"
               >
                 <div class="task-top">
                   <div class="task-index">任务点 {{ task.order_no || 1 }}</div>
-                  <span class="task-state" :class="task.is_completed ? 'done' : 'todo'">
-                    {{ task.is_completed ? '已完成' : '未完成' }}
-                  </span>
+                  <div class="task-top-right">
+                    <span class="task-question-summary">
+                      {{ getAnsweredQuestionCount(task.questions) }}/{{ getQuestionCount(task.questions) }} 已作答
+                    </span>
+                    <span class="task-state" :class="isTaskCompleted(task) ? 'done' : 'todo'">
+                      {{ isTaskCompleted(task) ? '已完成' : '未完成' }}
+                    </span>
+                  </div>
                 </div>
 
                 <div class="task-name-row">
-                  <span class="task-icon">{{ task.is_completed ? '✅' : '🟣' }}</span>
+                  <span class="task-icon">{{ isTaskCompleted(task) ? '✅' : '🟣' }}</span>
                   <h5 class="task-name">{{ task.task_name || '未命名任务点' }}</h5>
                 </div>
 
@@ -123,27 +133,54 @@
                   <div class="question-head">
                     <span>📝 题目</span>
                     <span class="question-count">
-                      {{ Array.isArray(task.questions) ? task.questions.length : 0 }} 题
+                      {{ getQuestionCount(task.questions) }} 题
                     </span>
                   </div>
 
                   <template v-if="Array.isArray(task.questions) && task.questions.length">
-                    <div
+                    <button
                       v-for="(question, qIndex) in task.questions"
                       :key="question.question_id || `question-${task.task_id || task.order_no}-${qIndex}`"
+                      type="button"
                       class="question-item"
+                      :class="getQuestionCardClass(question)"
+                      @click="openQuestionDialog(stage, task, question, qIndex)"
                     >
-                      <span class="question-dot"></span>
+                      <div class="question-item-left">
+                        <span class="question-no">{{ qIndex + 1 }}</span>
+                      </div>
+
                       <div class="question-main">
-                        <div class="question-text">
-                          {{ qIndex + 1 }}. {{ question.question_text || question.title || '未命名题目' }}
+                        <div class="question-top-line">
+                          <span class="question-type-tag">
+                            {{ getQuestionTypeLabel(question) }}
+                          </span>
+                          <span class="question-status-tag" :class="getQuestionStatusClass(question)">
+                            {{ getQuestionStatusText(question) }}
+                          </span>
                         </div>
-                        <div class="question-meta" v-if="question.correct_answer || question.user_answer">
-                          <span v-if="question.correct_answer">参考答案：{{ question.correct_answer }}</span>
-                          <span v-if="question.user_answer">我的作答：{{ question.user_answer }}</span>
+
+                        <div class="question-text line-clamp-2">
+                          {{ getQuestionStem(question) || question.question_text || '未命名题目' }}
+                        </div>
+
+                        <div class="question-meta">
+                          <span v-if="hasUserAnswered(question)">
+                            我的作答：{{ question.user_answer }}
+                          </span>
+                          <span v-if="hasUserAnswered(question)">
+                            参考答案：{{ getDisplayCorrectAnswer(question) }}
+                          </span>
+                          <span v-else>
+                            点击进入作答
+                          </span>
                         </div>
                       </div>
-                    </div>
+
+                      <div class="question-action">
+                        <span>{{ hasUserAnswered(question) ? '查看作答' : '去作答' }}</span>
+                      </div>
+                    </button>
                   </template>
 
                   <div v-else class="question-empty">
@@ -155,6 +192,137 @@
           </div>
         </div>
       </section>
+    </div>
+
+    <div
+      v-if="dialogVisible && activeQuestion"
+      class="answer-dialog-mask"
+      @click.self="closeQuestionDialog"
+    >
+      <div class="answer-dialog">
+        <div class="answer-dialog-header">
+          <div>
+            <div class="answer-dialog-badge">{{ activeQuestionTypeLabel }}</div>
+            <h3 class="answer-dialog-title">
+              {{ activeTask?.task_name || '任务题目' }}
+            </h3>
+            <p class="answer-dialog-subtitle">
+              第 {{ activeQuestionIndex + 1 }} 题
+            </p>
+          </div>
+          <button type="button" class="dialog-close-btn" @click="closeQuestionDialog">×</button>
+        </div>
+
+        <div class="answer-dialog-body">
+          <div class="dialog-section">
+            <div class="dialog-label">题目内容</div>
+            <div class="dialog-question-card">
+              <div class="dialog-question-text">
+                {{ activeQuestionStem }}
+              </div>
+            </div>
+          </div>
+
+          <div class="dialog-section" v-if="activeQuestionOptions.length">
+            <div class="dialog-label">选项作答</div>
+            <div class="option-list" v-if="!activeQuestionLocked">
+              <button
+                v-for="option in activeQuestionOptions"
+                :key="`${activeQuestion.question_id}-${option.label}`"
+                type="button"
+                class="option-item"
+                :class="{ active: selectedOptionLabel === option.label }"
+                @click="selectOption(option)"
+              >
+                <span class="option-label">{{ option.label }}</span>
+                <span class="option-text">{{ option.text }}</span>
+              </button>
+            </div>
+
+            <div class="answer-result-card" v-else>
+              <div class="answer-result-row">
+                <span class="answer-result-key">我的答案</span>
+                <span class="answer-result-value">{{ activeQuestion.user_answer || '未作答' }}</span>
+              </div>
+              <div class="answer-result-row">
+                <span class="answer-result-key">参考答案</span>
+                <span class="answer-result-value">{{ getDisplayCorrectAnswer(activeQuestion) }}</span>
+              </div>
+              <div class="answer-result-row" v-if="showJudgeResult(activeQuestion)">
+                <span class="answer-result-key">判题结果</span>
+                <span
+                  class="judge-chip"
+                  :class="Number(activeQuestion.is_passed) === 1 ? 'pass' : 'fail'"
+                >
+                  {{ Number(activeQuestion.is_passed) === 1 ? '回答正确' : '回答错误' }}
+                </span>
+              </div>
+              <div class="answer-result-row" v-else>
+                <span class="answer-result-key">判题结果</span>
+                <span class="judge-chip pending">待判定</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="dialog-section" v-else>
+            <div class="dialog-label">文本作答</div>
+            <template v-if="!activeQuestionLocked">
+              <textarea
+                v-model="draftTextAnswer"
+                class="answer-textarea"
+                placeholder="请输入你的答案"
+                rows="6"
+              ></textarea>
+              <p class="dialog-hint">
+                当前题目未解析出客观选项，已自动切换为文本作答模式。
+              </p>
+            </template>
+
+            <div v-else class="answer-result-card">
+              <div class="answer-result-row align-start">
+                <span class="answer-result-key">我的答案</span>
+                <span class="answer-result-value multi-line">{{ activeQuestion.user_answer || '未作答' }}</span>
+              </div>
+              <div class="answer-result-row align-start">
+                <span class="answer-result-key">参考答案</span>
+                <span class="answer-result-value multi-line">{{ getDisplayCorrectAnswer(activeQuestion) }}</span>
+              </div>
+              <div class="answer-result-row" v-if="showJudgeResult(activeQuestion)">
+                <span class="answer-result-key">判题结果</span>
+                <span
+                  class="judge-chip"
+                  :class="Number(activeQuestion.is_passed) === 1 ? 'pass' : 'fail'"
+                >
+                  {{ Number(activeQuestion.is_passed) === 1 ? '回答正确' : '回答错误' }}
+                </span>
+              </div>
+              <div class="answer-result-row" v-else>
+                <span class="answer-result-key">判题结果</span>
+                <span class="judge-chip pending">待判定</span>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="dialogMessage" class="dialog-toast" :class="dialogMessageType">
+            {{ dialogMessage }}
+          </div>
+        </div>
+
+        <div class="answer-dialog-footer">
+          <button type="button" class="dialog-btn secondary" @click="closeQuestionDialog">
+            {{ activeQuestionLocked ? '关闭' : '取消' }}
+          </button>
+          <button
+            v-if="!activeQuestionLocked"
+            type="button"
+            class="dialog-btn primary"
+            :disabled="saveDisabled || savingAnswer"
+            @click="saveCurrentAnswer"
+          >
+            {{ savingAnswer ? '保存中...' : '保存作答' }}
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -179,14 +347,29 @@ const displayStages = ref([])
 const loadingPaths = ref(false)
 const loadingDetail = ref(false)
 
-const selectedPath = computed(() => {
-  return pathDetailData.value?.path || null
-})
+const dialogVisible = ref(false)
+const activeStage = ref(null)
+const activeTask = ref(null)
+const activeQuestion = ref(null)
+const activeQuestionIndex = ref(0)
+const selectedOptionLabel = ref('')
+const draftTextAnswer = ref('')
+const savingAnswer = ref(false)
+const dialogMessage = ref('')
+const dialogMessageType = ref('success')
+
+const selectedPath = computed(() => pathDetailData.value?.path || null)
 
 const totalStages = computed(() => displayStages.value.length)
 
 const totalTasks = computed(() => {
   return displayStages.value.reduce((sum, stage) => sum + (stage.tasks?.length || 0), 0)
+})
+
+const totalQuestions = computed(() => {
+  return displayStages.value.reduce((sum, stage) => {
+    return sum + (stage.tasks || []).reduce((taskSum, task) => taskSum + getQuestionCount(task.questions), 0)
+  }, 0)
 })
 
 const completedTasks = computed(() => {
@@ -204,9 +387,41 @@ const completionRate = computed(() => {
 const currentStageName = computed(() => {
   const firstUnfinished = displayStages.value.find((stage) => {
     const tasks = stage.tasks || []
-    return tasks.some((task) => !task.is_completed)
+    return tasks.some((task) => !isTaskCompleted(task))
   })
   return firstUnfinished?.progress_name || '暂无'
+})
+
+const activeQuestionParsed = computed(() => {
+  if (!activeQuestion.value) {
+    return { stem: '', options: [] }
+  }
+  return parseQuestionContent(activeQuestion.value.question_text)
+})
+
+const activeQuestionStem = computed(() => {
+  return activeQuestionParsed.value.stem || activeQuestion.value?.question_text || ''
+})
+
+const activeQuestionOptions = computed(() => {
+  return activeQuestionParsed.value.options || []
+})
+
+const activeQuestionTypeLabel = computed(() => {
+  if (!activeQuestion.value) return '题目'
+  return activeQuestionOptions.value.length ? '选择题' : '文本题'
+})
+
+const activeQuestionLocked = computed(() => {
+  return hasUserAnswered(activeQuestion.value)
+})
+
+const saveDisabled = computed(() => {
+  if (!activeQuestion.value) return true
+  if (activeQuestionOptions.value.length) {
+    return !selectedOptionLabel.value
+  }
+  return !normalizeText(draftTextAnswer.value)
 })
 
 onMounted(async () => {
@@ -230,6 +445,79 @@ const unwrapResponse = (response) => {
 
 const sortByNumber = (list, field) => {
   return [...(list || [])].sort((a, b) => Number(a?.[field] || 0) - Number(b?.[field] || 0))
+}
+
+const normalizeText = (value) => {
+  return String(value || '').replace(/\s+/g, ' ').trim()
+}
+
+const parseQuestionContent = (questionText) => {
+  const raw = String(questionText || '').replace(/\r/g, '')
+  const lines = raw
+    .split('\n')
+    .map((item) => item.trim())
+    .filter(Boolean)
+
+  if (!lines.length) {
+    return { stem: '', options: [] }
+  }
+
+  const optionRegex = /^(?:选项)?([A-Z])\s*[\.、:：]\s*(.+)$/i
+  const firstOptionIndex = lines.findIndex((line) => optionRegex.test(line))
+
+  if (firstOptionIndex === -1) {
+    return {
+      stem: raw.trim(),
+      options: [],
+    }
+  }
+
+  const stem = lines.slice(0, firstOptionIndex).join('\n').trim()
+  const optionLines = lines.slice(firstOptionIndex)
+  const options = optionLines
+    .map((line) => {
+      const match = line.match(optionRegex)
+      if (!match) return null
+      return {
+        label: String(match[1] || '').toUpperCase(),
+        text: match[2] || '',
+      }
+    })
+    .filter(Boolean)
+
+  return {
+    stem: stem || raw.trim(),
+    options,
+  }
+}
+
+const extractOptionLabel = (value) => {
+  const text = normalizeText(value)
+  if (!text) return ''
+
+  const matched = text.match(/(?:选项)?\s*([A-Z])(?:\s*[\.、:：]|$)/i)
+  return matched?.[1]?.toUpperCase() || ''
+}
+
+const hasJudgeableCorrectAnswer = (question) => {
+  const correctAnswer = normalizeText(question?.correct_answer)
+  if (!correctAnswer) return false
+  return correctAnswer !== '(待判定)'
+}
+
+const compareAnswerWithCorrect = (userAnswer, correctAnswer) => {
+  const userText = normalizeText(userAnswer)
+  const correctText = normalizeText(correctAnswer)
+  if (!userText || !correctText || correctText === '(待判定)') return 0
+
+  const userLabel = extractOptionLabel(userText)
+  const correctLabel = extractOptionLabel(correctText)
+
+  if (userLabel && correctLabel) {
+    return userLabel === correctLabel ? 1 : 0
+  }
+
+  return userText === correctText ? 1 : 0
 }
 
 const normalizeQuestions = (questions) => {
@@ -384,7 +672,70 @@ const onPathChange = async () => {
 }
 
 const getCompletedTaskCount = (tasks = []) => {
-  return (tasks || []).filter((task) => !!task?.is_completed).length
+  return (tasks || []).filter((task) => isTaskCompleted(task)).length
+}
+
+const getQuestionCount = (questions = []) => {
+  return Array.isArray(questions) ? questions.length : 0
+}
+
+const getAnsweredQuestionCount = (questions = []) => {
+  return (questions || []).filter((question) => hasUserAnswered(question)).length
+}
+
+const isTaskCompleted = (task) => {
+  const questions = Array.isArray(task?.questions) ? task.questions : []
+  if (questions.length > 0) {
+    return questions.every((question) => hasUserAnswered(question))
+  }
+  return !!task?.is_completed
+}
+
+const getStageQuestionCount = (tasks = []) => {
+  return (tasks || []).reduce((sum, task) => sum + getQuestionCount(task.questions), 0)
+}
+
+const getStageAnsweredCount = (tasks = []) => {
+  return (tasks || []).reduce((sum, task) => sum + getAnsweredQuestionCount(task.questions), 0)
+}
+
+const hasUserAnswered = (question) => {
+  return !!normalizeText(question?.user_answer)
+}
+
+const getQuestionStem = (question) => {
+  return parseQuestionContent(question?.question_text).stem || question?.question_text || ''
+}
+
+const getQuestionTypeLabel = (question) => {
+  return parseQuestionContent(question?.question_text).options.length ? '选择题' : '文本题'
+}
+
+const getDisplayCorrectAnswer = (question) => {
+  return normalizeText(question?.correct_answer) || '暂无参考答案'
+}
+
+const showJudgeResult = (question) => {
+  return hasUserAnswered(question) && hasJudgeableCorrectAnswer(question)
+}
+
+const getQuestionStatusText = (question) => {
+  if (!hasUserAnswered(question)) return '未作答'
+  if (!hasJudgeableCorrectAnswer(question)) return '已作答'
+  return Number(question?.is_passed) === 1 ? '回答正确' : '回答错误'
+}
+
+const getQuestionStatusClass = (question) => {
+  if (!hasUserAnswered(question)) return 'todo'
+  if (!hasJudgeableCorrectAnswer(question)) return 'pending'
+  return Number(question?.is_passed) === 1 ? 'pass' : 'fail'
+}
+
+const getQuestionCardClass = (question) => {
+  return {
+    'question-item--answered': hasUserAnswered(question),
+    'question-item--pending': hasUserAnswered(question) && !hasJudgeableCorrectAnswer(question),
+  }
 }
 
 const formatDomain = (domain) => {
@@ -401,6 +752,185 @@ const formatPathOption = (path) => {
   const goal = path?.goal || '未命名路径'
   const level = path?.level || '未设置水平'
   return `${goal}（${level}）`
+}
+
+const clearDialogMessage = () => {
+  dialogMessage.value = ''
+  dialogMessageType.value = 'success'
+}
+
+const openQuestionDialog = (stage, task, question, qIndex) => {
+  activeStage.value = stage
+  activeTask.value = task
+  activeQuestion.value = question
+  activeQuestionIndex.value = qIndex
+  selectedOptionLabel.value = ''
+  draftTextAnswer.value = ''
+  clearDialogMessage()
+
+  if (hasUserAnswered(question)) {
+    const currentLabel = extractOptionLabel(question.user_answer)
+    if (currentLabel) {
+      selectedOptionLabel.value = currentLabel
+    }
+    draftTextAnswer.value = question.user_answer || ''
+  }
+
+  dialogVisible.value = true
+}
+
+const closeQuestionDialog = () => {
+  dialogVisible.value = false
+  activeStage.value = null
+  activeTask.value = null
+  activeQuestion.value = null
+  activeQuestionIndex.value = 0
+  selectedOptionLabel.value = ''
+  draftTextAnswer.value = ''
+  savingAnswer.value = false
+  clearDialogMessage()
+}
+
+const selectOption = (option) => {
+  selectedOptionLabel.value = option.label
+}
+
+const buildSelectedAnswer = () => {
+  if (activeQuestionOptions.value.length) {
+    const matched = activeQuestionOptions.value.find((item) => item.label === selectedOptionLabel.value)
+    if (!matched) return ''
+    return `${matched.label}. ${matched.text}`
+  }
+
+  return normalizeText(draftTextAnswer.value)
+}
+
+const updateLocalQuestionAnswer = ({ taskId, questionId, answer, isPassed, taskCompleted, pathStatus, currentTaskPoint }) => {
+  displayStages.value.forEach((stage) => {
+    ;(stage.tasks || []).forEach((task) => {
+      if (String(task.task_id) !== String(taskId)) return
+
+      ;(task.questions || []).forEach((question) => {
+        if (String(question.question_id) !== String(questionId)) return
+        question.user_answer = answer
+        question.is_passed = Number(isPassed || 0)
+      })
+
+      if (typeof taskCompleted === 'boolean') {
+        task.is_completed = taskCompleted
+      } else {
+        task.is_completed = isTaskCompleted(task)
+      }
+    })
+  })
+
+  displayStages.value = [...displayStages.value]
+
+  if (activeQuestion.value && String(activeQuestion.value.question_id) === String(questionId)) {
+    activeQuestion.value.user_answer = answer
+    activeQuestion.value.is_passed = Number(isPassed || 0)
+  }
+
+  if (activeTask.value && String(activeTask.value.task_id) === String(taskId)) {
+    activeTask.value.is_completed = typeof taskCompleted === 'boolean'
+      ? taskCompleted
+      : isTaskCompleted(activeTask.value)
+  }
+
+  if (pathDetailData.value?.path) {
+    if (pathStatus) {
+      pathDetailData.value.path.status = pathStatus
+    }
+    if (currentTaskPoint !== undefined) {
+      pathDetailData.value.path.current_task_point = currentTaskPoint
+    }
+    pathDetailData.value = {
+      ...pathDetailData.value,
+      path: { ...pathDetailData.value.path },
+    }
+  }
+}
+
+const submitAnswerToBackend = async (payload) => {
+  const requestBody = {
+    user_id: payload?.user_id ?? userId,
+    question_id: Number(payload?.question_id),
+    user_answer: payload?.user_answer ?? '',
+  }
+
+  if (typeof api.post === 'function') {
+    return unwrapResponse(await api.post('/api/tasks/answer', requestBody))
+  }
+
+  if (typeof api.saveTaskAnswer === 'function') {
+    return unwrapResponse(await api.saveTaskAnswer(requestBody))
+  }
+
+  if (typeof api.submitTaskAnswer === 'function') {
+    return unwrapResponse(await api.submitTaskAnswer(requestBody))
+  }
+
+  if (typeof api.submitAnswer === 'function') {
+    if (api.submitAnswer.length >= 2) {
+      return unwrapResponse(await api.submitAnswer(requestBody.question_id, requestBody.user_answer, requestBody.user_id))
+    }
+    return unwrapResponse(await api.submitAnswer(requestBody))
+  }
+
+  throw new Error('未找到可用的题目作答接口方法')
+}
+
+const saveCurrentAnswer = async () => {
+  if (!activeQuestion.value || !activeTask.value) return
+
+  const finalAnswer = buildSelectedAnswer()
+  if (!finalAnswer) {
+    dialogMessageType.value = 'error'
+    dialogMessage.value = '请先完成作答再保存。'
+    return
+  }
+
+  const isPassed = hasJudgeableCorrectAnswer(activeQuestion.value)
+    ? compareAnswerWithCorrect(finalAnswer, activeQuestion.value.correct_answer)
+    : 0
+
+  const payload = {
+    user_id: userId,
+    path_id: selectedPathId.value,
+    progress_id: activeStage.value?.progress_id,
+    task_id: activeTask.value.task_id,
+    question_id: activeQuestion.value.question_id,
+    user_answer: finalAnswer,
+    is_passed: isPassed,
+  }
+
+  savingAnswer.value = true
+  clearDialogMessage()
+
+  try {
+    const result = (await submitAnswerToBackend(payload)) || {}
+
+    updateLocalQuestionAnswer({
+      taskId: activeTask.value.task_id,
+      questionId: activeQuestion.value.question_id,
+      answer: result.user_answer || finalAnswer,
+      isPassed: result.is_passed ?? isPassed,
+      taskCompleted: typeof result.task_is_completed === 'boolean' ? result.task_is_completed : undefined,
+      pathStatus: result.path_status,
+      currentTaskPoint: result.current_task_point,
+    })
+
+    dialogMessageType.value = 'success'
+    dialogMessage.value = hasJudgeableCorrectAnswer(activeQuestion.value)
+      ? (isPassed === 1 ? '保存成功，回答正确。' : '保存成功，已完成判题。')
+      : '保存成功，当前题目参考答案待判定。'
+  } catch (error) {
+    console.error('保存题目作答失败:', error)
+    dialogMessageType.value = 'error'
+    dialogMessage.value = '保存失败，请稍后重试。'
+  } finally {
+    savingAnswer.value = false
+  }
 }
 </script>
 
@@ -547,7 +1077,8 @@ const formatPathOption = (path) => {
 .stage-desc,
 .task-desc,
 .question-empty,
-.status-view {
+.status-view,
+.dialog-hint {
   color: #6f6885;
 }
 
@@ -678,6 +1209,13 @@ const formatPathOption = (path) => {
   line-height: 1.7;
 }
 
+.stage-summary-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-end;
+}
+
 .stage-summary {
   padding: 10px 14px;
   border-radius: 14px;
@@ -687,6 +1225,11 @@ const formatPathOption = (path) => {
   font-weight: 700;
   color: #6d4cc0;
   white-space: nowrap;
+}
+
+.stage-summary.light {
+  background: #faf8ff;
+  color: #7a7391;
 }
 
 .task-list {
@@ -712,21 +1255,41 @@ const formatPathOption = (path) => {
 
 .task-top,
 .question-head,
-.task-name-row {
+.task-name-row,
+.question-top-line,
+.answer-result-row {
   display: flex;
   align-items: center;
 }
 
 .task-top,
-.question-head {
+.question-head,
+.answer-result-row {
   justify-content: space-between;
   gap: 12px;
+}
+
+.task-top-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .task-index {
   font-size: 12px;
   font-weight: 800;
   color: #7a7391;
+}
+
+.task-question-summary {
+  font-size: 12px;
+  font-weight: 700;
+  color: #746c8f;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: #f7f4ff;
 }
 
 .task-state {
@@ -776,7 +1339,7 @@ const formatPathOption = (path) => {
 }
 
 .question-head {
-  margin-bottom: 10px;
+  margin-bottom: 12px;
   font-size: 13px;
   color: #5f5874;
   font-weight: 700;
@@ -787,31 +1350,137 @@ const formatPathOption = (path) => {
 }
 
 .question-item {
+  width: 100%;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border-radius: 12px;
+  gap: 14px;
+  padding: 14px;
+  border-radius: 14px;
   background: #fff;
   border: 1px solid #eee8ff;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.question-item:hover {
+  border-color: #cdb9ff;
+  box-shadow: 0 12px 24px rgba(139, 92, 246, 0.08);
+  transform: translateY(-1px);
 }
 
 .question-item + .question-item {
-  margin-top: 8px;
+  margin-top: 10px;
 }
 
-.question-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #8b5cf6;
+.question-item--answered {
+  background: linear-gradient(180deg, #ffffff 0%, #fcfbff 100%);
+}
+
+.question-item--pending {
+  border-style: dashed;
+}
+
+.question-item-left {
   flex-shrink: 0;
+}
+
+.question-no {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #f3efff;
+  color: #7f56d9;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.question-main {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.question-top-line {
+  gap: 8px;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.question-type-tag,
+.question-status-tag,
+.answer-dialog-badge,
+.judge-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.question-type-tag,
+.answer-dialog-badge {
+  background: #f3efff;
+  color: #7f56d9;
+}
+
+.question-status-tag.todo {
+  background: #f5f5fb;
+  color: #7a7391;
+}
+
+.question-status-tag.pending,
+.judge-chip.pending {
+  background: rgba(250, 204, 21, 0.16);
+  color: #a16207;
+}
+
+.question-status-tag.pass,
+.judge-chip.pass {
+  background: rgba(34, 197, 94, 0.14);
+  color: #15803d;
+}
+
+.question-status-tag.fail,
+.judge-chip.fail {
+  background: rgba(239, 68, 68, 0.12);
+  color: #dc2626;
 }
 
 .question-text {
   font-size: 13px;
   color: #443c59;
-  line-height: 1.6;
+  line-height: 1.65;
+  word-break: break-word;
+}
+
+.question-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 12px;
+  color: #8a83a3;
+}
+
+.question-action {
+  flex-shrink: 0;
+  color: #7f56d9;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .question-empty {
@@ -826,6 +1495,253 @@ const formatPathOption = (path) => {
   padding: 56px 16px;
   text-align: center;
   font-size: 14px;
+}
+
+.answer-dialog-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(24, 18, 41, 0.4);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.answer-dialog {
+  width: min(760px, 100%);
+  max-height: 88vh;
+  overflow: hidden;
+  background: #fff;
+  border-radius: 24px;
+  border: 1px solid #ebe4ff;
+  box-shadow: 0 28px 80px rgba(43, 35, 64, 0.22);
+  display: flex;
+  flex-direction: column;
+}
+
+.answer-dialog-header {
+  padding: 22px 24px 18px;
+  border-bottom: 1px solid #f0ebff;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.answer-dialog-title {
+  margin: 12px 0 6px;
+  font-size: 22px;
+  color: #2f2840;
+}
+
+.answer-dialog-subtitle {
+  margin: 0;
+  font-size: 13px;
+  color: #8a83a3;
+}
+
+.dialog-close-btn {
+  width: 38px;
+  height: 38px;
+  border: none;
+  border-radius: 12px;
+  background: #f6f3ff;
+  color: #6d4cc0;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.answer-dialog-body {
+  padding: 22px 24px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.dialog-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dialog-label {
+  font-size: 13px;
+  color: #6f6885;
+  font-weight: 700;
+}
+
+.dialog-question-card,
+.answer-result-card {
+  border-radius: 18px;
+  background: #fbfaff;
+  border: 1px solid #ede7ff;
+  padding: 16px;
+}
+
+.dialog-question-text {
+  font-size: 15px;
+  line-height: 1.8;
+  color: #3a334d;
+  white-space: pre-wrap;
+}
+
+.option-list {
+  display: grid;
+  gap: 10px;
+}
+
+.option-item {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid #e8e1ff;
+  background: #fff;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.2s ease;
+}
+
+.option-item:hover {
+  border-color: #cdb9ff;
+  background: #faf7ff;
+}
+
+.option-item.active {
+  border-color: #8b5cf6;
+  box-shadow: 0 0 0 4px rgba(139, 92, 246, 0.12);
+  background: #fbf8ff;
+}
+
+.option-label {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #f3efff;
+  color: #7f56d9;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.option-text {
+  color: #403752;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.answer-textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 140px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid #ddd4ff;
+  outline: none;
+  font-size: 14px;
+  color: #352d49;
+  line-height: 1.7;
+  transition: all 0.2s ease;
+  box-sizing: border-box;
+}
+
+.answer-textarea:focus {
+  border-color: #8b5cf6;
+  box-shadow: 0 0 0 4px rgba(139, 92, 246, 0.12);
+}
+
+.dialog-hint {
+  margin: 0;
+  font-size: 12px;
+}
+
+.answer-result-row + .answer-result-row {
+  margin-top: 12px;
+}
+
+.answer-result-row.align-start {
+  align-items: flex-start;
+}
+
+.answer-result-key {
+  flex-shrink: 0;
+  min-width: 72px;
+  color: #746c8f;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.answer-result-value {
+  flex: 1;
+  color: #352d49;
+  font-size: 14px;
+  line-height: 1.7;
+  text-align: right;
+}
+
+.answer-result-value.multi-line {
+  white-space: pre-wrap;
+}
+
+.dialog-toast {
+  border-radius: 14px;
+  padding: 12px 14px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.dialog-toast.success {
+  background: rgba(34, 197, 94, 0.12);
+  color: #15803d;
+}
+
+.dialog-toast.error {
+  background: rgba(239, 68, 68, 0.12);
+  color: #dc2626;
+}
+
+.answer-dialog-footer {
+  padding: 16px 24px 22px;
+  border-top: 1px solid #f0ebff;
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.dialog-btn {
+  min-width: 108px;
+  height: 44px;
+  padding: 0 18px;
+  border-radius: 14px;
+  border: none;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.dialog-btn.secondary {
+  background: #f5f3ff;
+  color: #6d4cc0;
+}
+
+.dialog-btn.primary {
+  background: linear-gradient(90deg, #8b5cf6 0%, #7c3aed 100%);
+  color: #fff;
+}
+
+.dialog-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 @media (max-width: 1100px) {
@@ -860,21 +1776,51 @@ const formatPathOption = (path) => {
   .content-scroll {
     max-height: none;
   }
-}
 
-.question-main {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-}
+  .stage-summary-wrap {
+    width: 100%;
+    align-items: stretch;
+  }
 
-.question-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  font-size: 12px;
-  color: #8a83a3;
-}
+  .task-top,
+  .task-top-right,
+  .answer-result-row {
+    align-items: flex-start;
+  }
 
+  .task-top,
+  .task-top-right,
+  .answer-result-row,
+  .answer-dialog-footer {
+    flex-direction: column;
+  }
+
+  .question-item {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .question-action {
+    width: 100%;
+  }
+
+  .answer-dialog-mask {
+    padding: 12px;
+  }
+
+  .answer-dialog-header,
+  .answer-dialog-body,
+  .answer-dialog-footer {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .answer-result-value {
+    text-align: left;
+  }
+
+  .dialog-btn {
+    width: 100%;
+  }
+}
 </style>
