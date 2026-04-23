@@ -1,29 +1,136 @@
-from langchain_openai import ChatOpenAI
+import importlib
 import warnings
+from functools import lru_cache
+from typing import Any
+
+from langchain_openai import ChatOpenAI
 from neo4j import GraphDatabase
 
 warnings.filterwarnings("ignore")
 
-# ===================== 配置区 =====================
-API_KEY = "39cee702-8839-47eb-b155-171825131a24"  # 你自己填
-MODEL = "doubao-seed-2-0-pro-260215"
-BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
 
-NEO4J_URI = "bolt://localhost:7687"
-NEO4J_USER = "neo4j"
-NEO4J_PWD = "12345678"
-# ====================================================
+@lru_cache(maxsize=1)
+def _load_settings() -> Any:
+    """
+    统一复用项目中的配置读取方式，避免在 service 内写死静态变量。
+    优先尝试和 langchain_chat_service.py / learning_path_service.py 一致的配置入口。
+    """
+    candidate_modules = [
+        "langchain_app.config",
+        "config",
+    ]
+
+    last_error = None
+    for module_name in candidate_modules:
+        try:
+            module = importlib.import_module(module_name)
+            get_settings = getattr(module, "get_settings", None)
+            if callable(get_settings):
+                return get_settings()
+        except Exception as exc:
+            last_error = exc
+
+    raise RuntimeError(
+        "无法导入 get_settings()。请确认 question_service.py 与 "
+        "langchain_chat_service.py / learning_path_service.py 使用的是同一个 config.py。"
+    ) from last_error
+
+
+def _pick_setting(settings: Any, *names: str, default: Any = None, required: bool = False) -> Any:
+    """
+    兼容不同 service 中可能存在的字段命名差异。
+    例如：NEO4J_USER / NEO4J_USERNAME，API_KEY / ARK_API_KEY。
+    """
+    for name in names:
+        if hasattr(settings, name):
+            value = getattr(settings, name)
+            if value is not None and value != "":
+                return value
+
+    if required:
+        raise RuntimeError(f"配置缺失，未找到任一字段: {', '.join(names)}")
+    return default
 
 
 class QuestionService:
     def __init__(self) -> None:
-        self.llm = ChatOpenAI(
-            api_key=API_KEY,
-            model=MODEL,
-            base_url=BASE_URL,
-            temperature=0.7,
-            max_tokens=2048,
+        self.settings = _load_settings()
+
+        self.api_key = _pick_setting(
+            self.settings,
+            "ARK_API_KEY",
+            "VOLCENGINE_API_KEY",
+            "LLM_API_KEY",
+            "OPENAI_API_KEY",
+            "API_KEY",
+            required=True,
         )
+        self.model = _pick_setting(
+            self.settings,
+            "ARK_MODEL",
+            "LLM_MODEL",
+            "CHAT_MODEL",
+            "MODEL",
+            required=True,
+        )
+        self.base_url = _pick_setting(
+            self.settings,
+            "ARK_BASE_URL",
+            "LLM_BASE_URL",
+            "OPENAI_BASE_URL",
+            "BASE_URL",
+            default="https://ark.cn-beijing.volces.com/api/v3",
+        )
+        self.temperature = _pick_setting(
+            self.settings,
+            "QUESTION_TEMPERATURE",
+            "LLM_TEMPERATURE",
+            "TEMPERATURE",
+            default=0.7,
+        )
+        self.max_tokens = _pick_setting(
+            self.settings,
+            "QUESTION_MAX_TOKENS",
+            "LLM_MAX_TOKENS",
+            "MAX_TOKENS",
+            default=2048,
+        )
+
+        self.neo4j_uri = _pick_setting(
+            self.settings,
+            "NEO4J_URI",
+            required=True,
+        )
+        self.neo4j_user = _pick_setting(
+            self.settings,
+            "NEO4J_USERNAME",
+            "NEO4J_USER",
+            required=True,
+        )
+        self.neo4j_password = _pick_setting(
+            self.settings,
+            "NEO4J_PASSWORD",
+            "NEO4J_PWD",
+            required=True,
+        )
+
+        self.llm = ChatOpenAI(
+            api_key=self.api_key,
+            model=self.model,
+            base_url=self.base_url,
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
+        )
+        self.driver = GraphDatabase.driver(
+            self.neo4j_uri,
+            auth=(self.neo4j_user, self.neo4j_password),
+        )
+
+    def close(self) -> None:
+        try:
+            self.driver.close()
+        except Exception:
+            pass
 
     def generate_questions_for_path(self, path_json: dict) -> dict:
         """
@@ -69,7 +176,7 @@ class QuestionService:
         summary: str,
     ) -> dict:
         """
-        为路径中的每个任务补题，并将结果写回 task["questions"]。
+        为路径中的每个任务补题，并将结果写回 task['questions']。
         """
         stages = path_json.get("stages", [])
         if not isinstance(stages, list):
@@ -89,8 +196,6 @@ class QuestionService:
                 if not isinstance(task, dict):
                     continue
 
-                # 兼容旧/新结构：
-                # 新结构优先从 task_meta.knowledge_point_names 取
                 task_meta = task.get("task_meta", {})
                 if not isinstance(task_meta, dict):
                     task_meta = {}
@@ -109,16 +214,12 @@ class QuestionService:
                     or ""
                 )
 
-                # 没有知识点时，保持 questions 为列表，避免前端/后续逻辑报错
                 if not knowledge_point_names:
                     old_questions = task.get("questions", [])
                     task["questions"] = old_questions if isinstance(old_questions, list) else []
                     continue
 
-                # 从 Neo4j 查询匹配的 KnowledgePoint
                 matched_knowledge = self._query_matched_knowledge(knowledge_point_names)
-
-                # 生成题目（生成逻辑不动）
                 questions = self._generate_questions_for_task(
                     matched_knowledge,
                     field,
@@ -128,21 +229,18 @@ class QuestionService:
                     summary,
                     task_name,
                 )
-
-                # 塞回对应任务点
                 task["questions"] = questions if isinstance(questions, list) else []
 
         return path_json
 
-    def _query_matched_knowledge(self, knowledge_point_names: list) -> list:
+    def _query_matched_knowledge(self, knowledge_point_names: list[str]) -> list[str]:
         """
         从 Neo4j 查询与 knowledge_point_names 匹配的 KnowledgePoint。
         """
         try:
-            driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PWD))
-            matched = []
+            matched: list[str] = []
 
-            with driver.session() as session:
+            with self.driver.session() as session:
                 for name in knowledge_point_names:
                     result = session.run(
                         """
@@ -152,9 +250,10 @@ class QuestionService:
                         name=name,
                     )
                     for record in result:
-                        matched.append(record.get("name"))
+                        value = record.get("name")
+                        if value:
+                            matched.append(value)
 
-            driver.close()
             return matched
 
         except Exception as e:
@@ -173,7 +272,7 @@ class QuestionService:
     ) -> list:
         """
         为单个任务生成题目，返回列表。
-        这里不改你的生成逻辑。
+        这里不改原有生成逻辑，只改配置获取方式。
         """
         if not knowledge_list:
             return []
@@ -202,17 +301,15 @@ class QuestionService:
         questions = []
         for line in lines[:3]:
             if "|" in line:
-                # 单选题
-                parts = line.split("|", 1)
+                parts = [p.strip() for p in line.split("|")]
                 questions.append(
                     {
-                        "question_text": parts[0].strip(),
-                        "options": [x.strip() for x in parts[1].split("|")] if len(parts) > 1 else [],
-                        "correct_answer": "",  # 生成逻辑不动，仍保持空
+                        "question_text": parts[0] if parts else "",
+                        "options": parts[1:] if len(parts) > 1 else [],
+                        "correct_answer": "",
                     }
                 )
             else:
-                # 简答题
                 questions.append(
                     {
                         "question_text": line,
@@ -223,5 +320,6 @@ class QuestionService:
         return questions
 
 
-def get_question_service():
+@lru_cache(maxsize=1)
+def get_question_service() -> QuestionService:
     return QuestionService()
